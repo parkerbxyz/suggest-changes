@@ -13500,11 +13500,12 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
 
 const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_3__.Octokit();
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
+const eventPayload = require(process.env.GITHUB_EVENT_PATH);
 
 octokit.pulls.createReview({
   owner,
   repo,
-  pull_number: _octokit_action__WEBPACK_IMPORTED_MODULE_3__.context.payload.pull_request.number,
+  pull_number: eventPayload.pull_request.number,
   event: "REQUEST_CHANGES",
   body: _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput.comment,
   comments,
