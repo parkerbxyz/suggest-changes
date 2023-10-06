@@ -9,4 +9,4 @@ inputs:
     description: The pull request review comment
 runs:
   using: 'node20'
-  main: 'index.js'
+  main: 'dist/index.js'
