@@ -1,4 +1,4 @@
-import { getInput, setOutput, setFailed } from "@actions/core";
+import { getInput } from "@actions/core";
 import { Octokit } from "@octokit/action";
 import { getExecOutput } from "@actions/exec";
 import parseGitDiff from "parse-git-diff";
@@ -31,7 +31,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
 
 const octokit = new Octokit();
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
-const eventPayload = require(process.env.GITHUB_EVENT_PATH);
+const eventPayload = process.env.GITHUB_EVENT_PATH;
 
 octokit.pulls.createReview({
   owner,
