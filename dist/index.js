@@ -13497,7 +13497,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks.map(({ toFileRange, fromFileRange, changes }) => ({
     path,
     start_line: fromFileRange.start,
-    line: fromFileRange.start + fromFileRange.lines,
+    line: fromFileRange.start + fromFileRange.lines - 1,
     start_side: "RIGHT",
     side: "RIGHT",
     body: `\`\`\`\`suggestion\n${changes
