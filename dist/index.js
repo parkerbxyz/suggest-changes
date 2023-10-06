@@ -13475,6 +13475,9 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 /* harmony import */ var _octokit_action__WEBPACK_IMPORTED_MODULE_4__ = __nccwpck_require__(3760);
 /* harmony import */ var node_fs__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(7561);
 /* harmony import */ var parse_git_diff__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(7959);
+// @ts-check
+
+
 
 
 
@@ -13494,9 +13497,11 @@ const changedFiles = parsedDiff.files.filter(
 
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
-  chunks.map(({ toFileRange, fromFileRange, changes }) => ({
+  chunks.map(({ fromFileRange, changes }) => ({
     path,
     start_line: fromFileRange.start,
+    // The last line of the chunk is the start line plus the number of lines in the chunk
+    // (minus 1 because the start line is included in the chunk)
     line: fromFileRange.start + fromFileRange.lines - 1,
     start_side: "RIGHT",
     side: "RIGHT",
@@ -13518,7 +13523,7 @@ octokit.pulls.createReview({
   repo,
   pull_number: eventPayload.pull_request.number,
   event: "REQUEST_CHANGES",
-  body: _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput.comment,
+  body: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment'),
   comments,
 });
 
