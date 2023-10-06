@@ -13536,14 +13536,17 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
   }))
 )
 
-octokit.pulls.createReview({
-  owner,
-  repo,
-  pull_number: Number(eventPayload.pull_request.number),
-  event: 'REQUEST_CHANGES',
-  body: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment'),
-  comments,
-})
+// Create a review with the suggested changes if there are any
+if (comments.length > 0) {
+  await octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number: Number(eventPayload.pull_request.number),
+    event: 'REQUEST_CHANGES',
+    body: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment'),
+    comments,
+  })
+}
 
 __webpack_async_result__();
 } catch(e) { __webpack_async_result__(e); } }, 1);
