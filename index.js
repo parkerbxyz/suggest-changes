@@ -1,8 +1,7 @@
 import { debug, getInput } from "@actions/core";
 import { getExecOutput } from "@actions/exec";
 import { Octokit } from "@octokit/action";
-
-import readFileSync from "node:fs";
+import { readFileSync } from "node:fs";
 import parseGitDiff from "parse-git-diff";
 
 // Get the diff between the head branch and the base branch
