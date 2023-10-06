@@ -1,6 +1,8 @@
-import { getInput, debug } from "@actions/core";
-import { Octokit } from "@octokit/action";
+import { debug, getInput } from "@actions/core";
 import { getExecOutput } from "@actions/exec";
+import { Octokit } from "@octokit/action";
+
+import readFileSync from "node:fs";
 import parseGitDiff from "parse-git-diff";
 
 // Get the diff between the head branch and the base branch
@@ -31,8 +33,9 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
 
 const octokit = new Octokit();
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
-const eventPayload = process.env.GITHUB_EVENT_PATH;
-
+const eventPayload = JSON.parse(
+  readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")
+);
 debug(`Event payload: ${eventPayload}`);
 
 octokit.pulls.createReview({

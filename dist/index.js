@@ -13382,6 +13382,13 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("net");
 
 /***/ }),
 
+/***/ 7561:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
+
+/***/ }),
+
 /***/ 2037:
 /***/ ((module) => {
 
@@ -13464,9 +13471,12 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("zlib");
 
 __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependencies__, __webpack_async_result__) => { try {
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(3044);
-/* harmony import */ var _octokit_action__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(3760);
 /* harmony import */ var _actions_exec__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(1613);
-/* harmony import */ var parse_git_diff__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(7959);
+/* harmony import */ var _octokit_action__WEBPACK_IMPORTED_MODULE_4__ = __nccwpck_require__(3760);
+/* harmony import */ var node_fs__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(7561);
+/* harmony import */ var parse_git_diff__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(7959);
+
+
 
 
 
@@ -13476,7 +13486,7 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)("git", ["diff"], { silent: true });
 
 // Create an array of changes from the diff output based on patches
-const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_2__/* ["default"] */ .Z)(diff.stdout);
+const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_3__/* ["default"] */ .Z)(diff.stdout);
 
 // Get changed files from parsedDiff (changed files have type 'ChangedFile')
 const changedFiles = parsedDiff.files.filter(
@@ -13498,10 +13508,11 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
   }))
 );
 
-const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_3__.Octokit();
+const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_4__.Octokit();
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
-const eventPayload = process.env.GITHUB_EVENT_PATH;
-
+const eventPayload = JSON.parse(
+  node_fs__WEBPACK_IMPORTED_MODULE_2__(process.env.GITHUB_EVENT_PATH, "utf8")
+);
 (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Event payload: ${eventPayload}`);
 
 octokit.pulls.createReview({
