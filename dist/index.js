@@ -13502,6 +13502,8 @@ const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_3__.Octokit();
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
 const eventPayload = process.env.GITHUB_EVENT_PATH;
 
+(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Event payload: ${eventPayload}`);
+
 octokit.pulls.createReview({
   owner,
   repo,
