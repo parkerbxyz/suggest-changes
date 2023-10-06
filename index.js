@@ -1,4 +1,4 @@
-import { debug, getInput } from "@actions/core";
+import { getInput } from "@actions/core";
 import { getExecOutput } from "@actions/exec";
 import { Octokit } from "@octokit/action";
 import { readFileSync } from "node:fs";
@@ -20,7 +20,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks.map(({ toFileRange, fromFileRange, changes }) => ({
     path,
     start_line: fromFileRange.start,
-    line: toFileRange.lines,
+    line: fromFileRange.lines,
     start_side: "RIGHT",
     side: "RIGHT",
     body: `\`\`\`\`suggestion\n${changes
@@ -35,7 +35,6 @@ const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
 const eventPayload = JSON.parse(
   readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")
 );
-debug(`Event payload: ${eventPayload}`);
 
 octokit.pulls.createReview({
   owner,
