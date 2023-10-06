@@ -2,11 +2,11 @@
 name: 'Suggest Changes'
 description: 'Create review suggestions from working directory changes'
 inputs:
-  comment:
-    description: The pull request review comment
   token:
     description: Access token to make authenticated API calls
     default: ${{ github.token }}
+  comment:
+    description: The pull request review comment
 runs:
   using: 'node20'
   main: 'dist/index.js'
