@@ -13389,6 +13389,13 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
 
 /***/ }),
 
+/***/ 7742:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:process");
+
+/***/ }),
+
 /***/ 2037:
 /***/ ((module) => {
 
@@ -13472,9 +13479,10 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("zlib");
 __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependencies__, __webpack_async_result__) => { try {
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(3044);
 /* harmony import */ var _actions_exec__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(1613);
-/* harmony import */ var _octokit_action__WEBPACK_IMPORTED_MODULE_4__ = __nccwpck_require__(3760);
+/* harmony import */ var _octokit_action__WEBPACK_IMPORTED_MODULE_5__ = __nccwpck_require__(3760);
 /* harmony import */ var node_fs__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(7561);
-/* harmony import */ var parse_git_diff__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(7959);
+/* harmony import */ var node_process__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(7742);
+/* harmony import */ var parse_git_diff__WEBPACK_IMPORTED_MODULE_4__ = __nccwpck_require__(7959);
 // @ts-check
 
 
@@ -13484,16 +13492,33 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 
 
 
+
+const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_5__.Octokit({
+  userAgent: 'suggest-changes',
+})
+
+const [owner, repo] = String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_REPOSITORY).split('/')
+const eventPayload = JSON.parse(
+  (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_EVENT_PATH), 'utf8')
+)
+
 // Get the diff between the head branch and the base branch
-const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)("git", ["diff"], { silent: true });
+const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)('git', ['diff'], { silent: true })
 
 // Create an array of changes from the diff output based on patches
-const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_3__/* ["default"] */ .Z)(diff.stdout);
+const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_4__/* ["default"] */ .Z)(diff.stdout)
 
 // Get changed files from parsedDiff (changed files have type 'ChangedFile')
 const changedFiles = parsedDiff.files.filter(
-  (file) => file.type === "ChangedFile"
-);
+  (/** @type {{ type: string; }} */ file) => file.type === 'ChangedFile'
+)
+
+const generateSuggestionBody = (changes) => {
+  return changes
+    .filter(({ type }) => type === 'AddedLine' || type === 'UnchangedLine')
+    .map(({ content }) => content)
+    .join('\n')
+}
 
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
@@ -13501,31 +13526,24 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
     path,
     start_line: fromFileRange.start,
     // The last line of the chunk is the start line plus the number of lines in the chunk
-    // (minus 1 because the start line is included in the chunk)
+    // minus 1 to account for the start line being included in fromFileRange.lines
     line: fromFileRange.start + fromFileRange.lines - 1,
-    start_side: "RIGHT",
-    side: "RIGHT",
-    body: `\`\`\`\`suggestion\n${changes
-      .filter(({ type }) => type === "AddedLine" || type === "UnchangedLine")
-      .map(({ content }) => content)
-      .join("\n")}\n\`\`\`\``,
+    start_side: 'RIGHT',
+    side: 'RIGHT',
+    // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
+    // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
+    body: `\`\`\`\`suggestion\n${generateSuggestionBody(changes)}\n\`\`\`\``,
   }))
-);
-
-const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_4__.Octokit();
-const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
-const eventPayload = JSON.parse(
-  (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(process.env.GITHUB_EVENT_PATH, "utf8")
-);
+)
 
 octokit.pulls.createReview({
   owner,
   repo,
-  pull_number: eventPayload.pull_request.number,
-  event: "REQUEST_CHANGES",
+  pull_number: Number(eventPayload.pull_request.number),
+  event: 'REQUEST_CHANGES',
   body: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment'),
   comments,
-});
+})
 
 __webpack_async_result__();
 } catch(e) { __webpack_async_result__(e); } }, 1);
