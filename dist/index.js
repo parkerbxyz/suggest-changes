@@ -13481,7 +13481,6 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 
 
 
-
 // Get the diff between the head branch and the base branch
 const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)("git", ["diff"], { silent: true });
 
@@ -13511,7 +13510,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
 const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_4__.Octokit();
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
 const eventPayload = JSON.parse(
-  node_fs__WEBPACK_IMPORTED_MODULE_2__(process.env.GITHUB_EVENT_PATH, "utf8")
+  (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(process.env.GITHUB_EVENT_PATH, "utf8")
 );
 (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Event payload: ${eventPayload}`);
 
