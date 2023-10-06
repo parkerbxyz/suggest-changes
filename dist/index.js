@@ -13497,7 +13497,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks.map(({ toFileRange, fromFileRange, changes }) => ({
     path,
     start_line: fromFileRange.start,
-    line: toFileRange.lines,
+    line: fromFileRange.lines,
     start_side: "RIGHT",
     side: "RIGHT",
     body: `\`\`\`\`suggestion\n${changes
@@ -13512,7 +13512,6 @@ const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
 const eventPayload = JSON.parse(
   (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(process.env.GITHUB_EVENT_PATH, "utf8")
 );
-(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Event payload: ${eventPayload}`);
 
 octokit.pulls.createReview({
   owner,
