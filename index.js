@@ -51,11 +51,14 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
   }))
 )
 
-octokit.pulls.createReview({
-  owner,
-  repo,
-  pull_number: Number(eventPayload.pull_request.number),
-  event: 'REQUEST_CHANGES',
-  body: getInput('comment'),
-  comments,
-})
+// Create a review with the suggested changes if there are any
+if (comments.length > 0) {
+  await octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number: Number(eventPayload.pull_request.number),
+    event: 'REQUEST_CHANGES',
+    body: getInput('comment'),
+    comments,
+  })
+}
