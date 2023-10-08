@@ -4,10 +4,6 @@
   "scripts": {
     "build": "ncc build index.js"
   },
-  "prettier": {
-    "semi": false,
-    "singleQuote": false
-  },
   "dependencies": {
     "@actions/core": "^1.10.0",
     "@actions/exec": "^1.1.1",
@@ -16,5 +12,20 @@
   },
   "devDependencies": {
     "@vercel/ncc": "^0.38.0"
+  },
+  "prettier": {
+    "semi": false,
+    "singleQuote": false
+  },
+  "release": {
+    "branches": [
+      "main"
+    ],
+    "plugins": [
+      "@semantic-release/commit-analyzer",
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/github",
+      "semantic-release-plugin-github-breaking-version-tag"
+    ]
   }
 }
