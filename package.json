@@ -4,6 +4,10 @@
   "scripts": {
     "build": "ncc build index.js"
   },
+  "prettier": {
+    "semi": false,
+    "singleQuote": false
+  },
   "dependencies": {
     "@actions/core": "^1.10.0",
     "@actions/exec": "^1.1.1",
