@@ -16,9 +16,16 @@ const [owner, repo] = String(env.GITHUB_REPOSITORY).split('/')
 const eventPayload = JSON.parse(
   readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
 )
+const pull_number = Number(eventPayload.pull_request.number)
 
-// Get the diff between the head branch and the base branch
-const diff = await getExecOutput('git', ['diff'], { silent: true })
+const pullRequestFiles = (
+  await octokit.pulls.listFiles({ owner, repo, pull_number })
+).data.map((file) => file.filename)
+
+// Get the diff between the head branch and the base branch (limit to the files in the pull request)
+const diff = await getExecOutput('git', ['diff', '--', ...pullRequestFiles], {
+  silent: true,
+})
 
 // Create an array of changes from the diff output based on patches
 const parsedDiff = parseGitDiff(diff.stdout)
@@ -56,7 +63,7 @@ if (comments.length > 0) {
   await octokit.pulls.createReview({
     owner,
     repo,
-    pull_number: Number(eventPayload.pull_request.number),
+    pull_number,
     event: 'REQUEST_CHANGES',
     body: getInput('comment'),
     comments,
