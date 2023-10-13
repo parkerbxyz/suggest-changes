@@ -36362,9 +36362,16 @@ const [owner, repo] = String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHU
 const eventPayload = JSON.parse(
   (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_EVENT_PATH), 'utf8')
 )
+const pull_number = Number(eventPayload.pull_request.number)
 
-// Get the diff between the head branch and the base branch
-const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)('git', ['diff'], { silent: true })
+const pullRequestFiles = (
+  await octokit.pulls.listFiles({ owner, repo, pull_number })
+).data.map((file) => file.filename)
+
+// Get the diff between the head branch and the base branch (limit to the files in the pull request)
+const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)('git', ['diff', '--', ...pullRequestFiles], {
+  silent: true,
+})
 
 // Create an array of changes from the diff output based on patches
 const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_4__/* ["default"] */ .Z)(diff.stdout)
@@ -36402,7 +36409,7 @@ if (comments.length > 0) {
   await octokit.pulls.createReview({
     owner,
     repo,
-    pull_number: Number(eventPayload.pull_request.number),
+    pull_number,
     event: 'REQUEST_CHANGES',
     body: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment'),
     comments,
