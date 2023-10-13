@@ -13,9 +13,12 @@ const octokit = new Octokit({
 })
 
 const [owner, repo] = String(env.GITHUB_REPOSITORY).split('/')
+
+/** @type {import("@octokit/webhooks-types").PullRequestEvent} */
 const eventPayload = JSON.parse(
   readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
 )
+
 const pull_number = Number(eventPayload.pull_request.number)
 
 const pullRequestFiles = (

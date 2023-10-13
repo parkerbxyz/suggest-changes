@@ -36359,9 +36359,12 @@ const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_5__.Octokit({
 })
 
 const [owner, repo] = String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_REPOSITORY).split('/')
+
+/** @type {import("@octokit/webhooks-types").PullRequestEvent} */
 const eventPayload = JSON.parse(
   (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_EVENT_PATH), 'utf8')
 )
+
 const pull_number = Number(eventPayload.pull_request.number)
 
 const pullRequestFiles = (
