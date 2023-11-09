@@ -26,6 +26,7 @@ jobs:
       - run: npm clean-install
       - run: npm audit signatures
       - run: npm run build
+      - run: npm install --no-save semantic-release-plugin-github-breaking-version-tag
       - run: npx semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
