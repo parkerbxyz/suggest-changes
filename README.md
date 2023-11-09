@@ -34,3 +34,10 @@ jobs:
 
 > [!NOTE]
 > Suggested changes are limited to [3000 files per pull request](https://docs.github.com/rest/pulls/pulls?apiVersion=2022-11-28#list-pull-requests-files)
+
+Here is what an automated pull request review with suggested changes would look like using the workflow configuration above:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/parkerbxyz/suggest-changes/assets/17183625/7657671b-35ba-4609-8031-8dc88a6e75e8">
+  <img alt="A screenshot showing an automated pull request review with suggested changes" src="https://github.com/parkerbxyz/suggest-changes/assets/17183625/b59e0b60-162f-47ef-8c18-4e5ea11fb175">
+</picture>
