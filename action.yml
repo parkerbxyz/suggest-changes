@@ -1,5 +1,5 @@
 ---
-name: 'Suggest Changes'
+name: 'Suggest Changes Action'
 description: 'Create review suggestions from working directory changes'
 branding:
   icon: 'git-pull-request'
