@@ -12,7 +12,7 @@
   },
   "devDependencies": {
     "@octokit/webhooks-types": "^7.3.1",
-    "@vercel/ncc": "^0.38.0"
+    "@vercel/ncc": "^0.38.1"
   },
   "prettier": {
     "semi": false,
