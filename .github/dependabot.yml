@@ -1,6 +1,4 @@
-# Please see the documentation for all configuration options:
-# https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
-
+---
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -12,7 +10,13 @@ updates:
         dependency-type: "production"
       development-dependencies:
         dependency-type: "development"
+    commit-message:
+      prefix: "fix"
+      prefix-development: "build"
+      include: "scope"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "monthly"
+    commit-message:
+      prefix: "ci"
