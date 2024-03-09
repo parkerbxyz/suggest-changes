@@ -5,11 +5,6 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
-    groups:
-      production-dependencies:
-        dependency-type: "production"
-      development-dependencies:
-        dependency-type: "development"
     commit-message:
       prefix: "fix"
       prefix-development: "build"
