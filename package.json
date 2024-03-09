@@ -21,12 +21,6 @@
   "release": {
     "branches": [
       "main"
-    ],
-    "plugins": [
-      "@semantic-release/commit-analyzer",
-      "@semantic-release/release-notes-generator",
-      ["@semantic-release/github", { "draftRelease": true }],
-      "semantic-release-plugin-github-breaking-version-tag"
     ]
   }
 }
