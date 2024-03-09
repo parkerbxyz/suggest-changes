@@ -11,7 +11,7 @@
     "parse-git-diff": "^0.0.14"
   },
   "devDependencies": {
-    "@octokit/webhooks-types": "^7.3.1",
+    "@octokit/webhooks-types": "^7.3.2",
     "@vercel/ncc": "^0.38.1"
   },
   "prettier": {
