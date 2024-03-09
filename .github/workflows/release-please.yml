@@ -24,6 +24,7 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
       - name: Update major version tag
+        if: steps.release.outputs.release_created == 'true'
         run: |
           # Update the major version tag to point to the new release
           git tag --force v${{ steps.release.outputs.major }} v${{ steps.release.outputs.version }}
