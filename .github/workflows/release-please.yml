@@ -30,4 +30,4 @@ jobs:
         run: |
           # Update the major version tag to point to the new release
           git tag --force v${{ steps.release.outputs.major }} v${{ steps.release.outputs.version }}
-          git push --force v${{ steps.release.outputs.major }}
+          git push origin v${{ steps.release.outputs.major }} --force-with-lease
