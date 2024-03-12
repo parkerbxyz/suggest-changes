@@ -11,6 +11,6 @@
 
   jobs:
     release-please:
-      uses: parkerbxyz/.github/.github/workflows/release.yml@main
+      uses: parkerbxyz/.github/.github/workflows/release-please.yml@main
       with:
         release-type: "node"
