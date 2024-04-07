@@ -1,6 +1,5 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
-  "changelog-type": "github",
   "release-type": "node",
   "packages": {
     ".": {}
