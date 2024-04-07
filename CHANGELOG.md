@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.2...v1.0.3) (2024-04-07)
+
+
+### Bug Fixes
+
+* **deps:** bump @octokit/action from 6.0.7 to 6.1.0 ([#21](https://github.com/parkerbxyz/suggest-changes/issues/21)) ([c35d8ba](https://github.com/parkerbxyz/suggest-changes/commit/c35d8ba468a10051e523f4382e5706beac22fd33))
+
 ## [1.0.2](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.1...v1.0.2) (2024-04-04)
 
 
