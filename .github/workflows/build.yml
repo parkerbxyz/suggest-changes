@@ -16,3 +16,4 @@ jobs:
     uses: parkerbxyz/.github/.github/workflows/npm-run-build.yml@main
     with:
       commit-message: 'chore: update dist files'
+    secrets: inherit
