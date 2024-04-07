@@ -15,5 +15,7 @@ jobs:
     if: startsWith(github.head_ref, 'release-please--') || github.event_name == 'workflow_dispatch'
     uses: parkerbxyz/.github/.github/workflows/npm-run-build.yml@main
     with:
+      app-id: ${{ vars.ACTIONS_APP_ID }}
       commit-message: 'chore: update dist files'
-    secrets: inherit
+    secrets:
+      app-private-key: ${{ secrets.ACTIONS_APP_PRIVATE_KEY }}
