@@ -28,4 +28,4 @@ jobs:
         with:
           file_pattern: 'dist/*'
           commit_author: '${{ github.actor }} <${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com>'
-          commit_message: 'Update dist files'
+          commit_message: 'chore: update dist files'
