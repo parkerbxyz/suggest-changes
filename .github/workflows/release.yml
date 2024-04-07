@@ -1,0 +1,13 @@
+name: release
+
+on:
+  workflow_dispatch:
+  release:
+    types: [released]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: parkerbxyz/.github/.github/workflows/release.yml@main
