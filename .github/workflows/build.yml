@@ -1,0 +1,29 @@
+name: Build
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  build:
+    if:  startsWith(github.head_ref, 'release-please')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          cache: 'npm'
+          node-version-file: '.node-version'
+      - run: npm ci
+      - name: Run build script
+        id: build
+        run: npm run build
+      - name: Commit changes
+        if: steps.build.conclusion == 'success'
+        uses: stefanzweifel/git-auto-commit-action@8756aa072ef5b4a080af5dc8fef36c5d586e521d # v5.0.0
+        with:
+          file_pattern: 'dist/*'
+          commit_message: 'Update dist files'
