@@ -15,4 +15,4 @@ jobs:
     if: startsWith(github.head_ref, 'release-please--') || github.event_name == 'workflow_dispatch'
     uses: parkerbxyz/.github/.github/workflows/npm-run-build.yml@main
     with:
-      commit-message: "chore: update dist files"
+      commit-message: 'chore: update dist files'
