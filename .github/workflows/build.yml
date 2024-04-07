@@ -1,7 +1,8 @@
 name: Build
 
 on:
-  workflow_dispatch:
+  pull_request:
+    paths: CHANGELOG.md
 
 permissions:
   contents: write
@@ -9,6 +10,7 @@ permissions:
 
 jobs:
   build:
+    if:  startsWith(github.head_ref, 'release-please')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,4 +28,4 @@ jobs:
         with:
           file_pattern: 'dist/*'
           commit_author: '${{ github.actor }} <${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com>'
-          commit_message: 'Update dist files'
+          commit_message: 'chore: update dist files'
