@@ -14,16 +14,21 @@ You can use this action in an existing workflow and have it run after a linter o
 
 ```yaml
 name: 'markdownlint'
+
 on:
   pull_request:
     paths: ['**/*.md']
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DavidAnson/markdownlint-cli2-action@v13
+      - uses: DavidAnson/markdownlint-cli2-action@v15
         with:
           fix: true
           globs: '**/*.md'
