@@ -1,5 +1,5 @@
 {
-  "description": "GitHub Action for turning working directory changes into pull request review suggestions",
+  "description": "A GitHub Action for turning working directory changes into pull request review suggestions",
   "type": "module",
   "scripts": {
     "build": "esbuild --bundle --platform=node --format=esm --outdir=dist index.js"
