@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.4](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.3...v1.0.4) (2024-04-09)
+
+
+### Bug Fixes
+
+* **build:** revert change from ncc to esbuild ([#26](https://github.com/parkerbxyz/suggest-changes/issues/26)) ([74ce367](https://github.com/parkerbxyz/suggest-changes/commit/74ce367024c362b52830e597181144172a4c6b97))
+
 ## [1.0.3](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.2...v1.0.3) (2024-04-07)
 
 
