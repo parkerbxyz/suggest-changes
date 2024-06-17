@@ -26,7 +26,9 @@ const pullRequestFiles = (
 ).data.map((file) => file.filename)
 
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-const diff = await getExecOutput('git', ['diff', '--', ...pullRequestFiles], {
+// Set context=0 so suggestions are inline with the changed code, which avoids Github
+// complaining that "Applying suggestions on deleted lines is not supported"
+const diff = await getExecOutput('git', ['diff', '-U0', '--', ...pullRequestFiles], {
   silent: true,
 })
 
@@ -47,18 +49,32 @@ const generateSuggestionBody = (changes) => {
 
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
-  chunks.map(({ fromFileRange, changes }) => ({
-    path,
-    start_line: fromFileRange.start,
-    // The last line of the chunk is the start line plus the number of lines in the chunk
-    // minus 1 to account for the start line being included in fromFileRange.lines
-    line: fromFileRange.start + fromFileRange.lines - 1,
-    start_side: 'RIGHT',
-    side: 'RIGHT',
-    // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
-    // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
-    body: `\`\`\`\`suggestion\n${generateSuggestionBody(changes)}\n\`\`\`\``,
-  }))
+  chunks.map(({ fromFileRange, changes }) => {
+    if (fromFileRange.start == fromFileRange.lines && changes.length == 2) {
+      // Single line change
+      return {
+        path,
+        lines: fromFileRange.start,
+        // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
+        // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
+        body: `\`\`\`\`suggestion\n${generateSuggestionBody(changes)}\n\`\`\`\``,
+      }
+    }
+    // Multi-line change
+    return
+    {
+      path,
+      start_line: fromFileRange.start,
+      // The last line of the chunk is the start line plus the number of lines in the chunk
+      // minus 1 to account for the start line being included in fromFileRange.lines
+      line: fromFileRange.start + fromFileRange.lines - 1,
+      start_side: 'RIGHT',
+      side: 'RIGHT',
+      // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
+      // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
+      body: `\`\`\`\`suggestion\n${generateSuggestionBody(changes)}\n\`\`\`\``,
+    }
+  })
 )
 
 // Create a review with the suggested changes if there are any
