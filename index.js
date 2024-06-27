@@ -80,10 +80,10 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
     // The last line of the chunk is the start line plus the number of lines in the chunk
     // minus 1 to account for the start line being included in fromFileRange.lines
     const endLine = startLine + fromFileRange.lines - 1
-    if (startLine === endLine) {
-      return createSingleLineComment(path, startLine, changes)
-    } else {
+    if (endLine > startLine) {
       return createMultiLineComment(path, startLine, endLine, changes)
+    } else {
+      return createSingleLineComment(path, startLine, changes)
     }
   })
 )
