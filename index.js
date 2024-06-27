@@ -26,15 +26,9 @@ const pullRequestFiles = (
 ).data.map((file) => file.filename)
 
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-// Set context=0 so suggestions are inline with the changed code to avoid running into the error
-// "Applying suggestions on deleted lines is not supported"
-const diff = await getExecOutput(
-  'git',
-  ['diff', '-U0', '--', ...pullRequestFiles],
-  {
-    silent: true,
-  }
-)
+const diff = await getExecOutput('git', ['diff', '--', ...pullRequestFiles], {
+  silent: true,
+})
 
 debug(`Diff output: ${diff.stdout}`)
 
