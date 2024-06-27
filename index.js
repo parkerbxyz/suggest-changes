@@ -8,6 +8,8 @@ import { readFileSync } from 'node:fs'
 import { env } from 'node:process'
 import parseGitDiff from 'parse-git-diff'
 
+debug("Test debug message")
+
 const octokit = new Octokit({
   userAgent: 'suggest-changes',
 })
