@@ -1,6 +1,6 @@
 // @ts-check
 
-import { getInput } from '@actions/core'
+import { debug, getInput } from '@actions/core'
 import { getExecOutput } from '@actions/exec'
 import { Octokit } from '@octokit/action'
 
@@ -78,6 +78,8 @@ function createMultiLineComment(path, fromFileRange, changes) {
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks.map(({ fromFileRange, changes }) => {
+    debug(`Starting line: ${fromFileRange.start}`)
+    debug(`Number of lines: ${fromFileRange.lines}`)
     if (fromFileRange.start == fromFileRange.lines && changes.length == 2) {
       return createSingleLineComment(path, fromFileRange, changes)
     } else {
