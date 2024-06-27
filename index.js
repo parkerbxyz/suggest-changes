@@ -38,6 +38,8 @@ const diff = await getExecOutput(
   }
 )
 
+debug(`Diff output: ${diff.stdout}`)
+
 // Create an array of changes from the diff output based on patches
 const parsedDiff = parseGitDiff(diff.stdout)
 
