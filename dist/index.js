@@ -53046,8 +53046,6 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 
 
 
-(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)("Test debug message")
-
 const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_5__/* .Octokit */ .vd({
   userAgent: 'suggest-changes',
 })
@@ -53066,15 +53064,9 @@ const pullRequestFiles = (
 ).data.map((file) => file.filename)
 
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-// Set context=0 so suggestions are inline with the changed code to avoid running into the error
-// "Applying suggestions on deleted lines is not supported"
-const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
-  'git',
-  ['diff', '-U0', '--', ...pullRequestFiles],
-  {
-    silent: true,
-  }
-)
+const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)('git', ['diff', '--', ...pullRequestFiles], {
+  silent: true,
+})
 
 ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Diff output: ${diff.stdout}`)
 
@@ -53096,19 +53088,21 @@ const generateSuggestionBody = (changes) => {
   return `\`\`\`\`suggestion\n${suggestionBody}\n\`\`\`\``
 }
 
-function createSingleLineComment(path, startLine, changes) {
+function createSingleLineComment(path, fromFileRange, changes) {
   return {
     path,
-    line: startLine,
+    line: fromFileRange.start,
     body: generateSuggestionBody(changes),
   }
 }
 
-function createMultiLineComment(path, startLine, endLine, changes) {
+function createMultiLineComment(path, fromFileRange, changes) {
   return {
     path,
-    start_line: startLine,
-    line: endLine,
+    start_line: fromFileRange.start,
+    // The last line of the chunk is the start line plus the number of lines in the chunk
+    // minus 1 to account for the start line being included in fromFileRange.lines
+    line: fromFileRange.start + fromFileRange.lines - 1,
     start_side: 'RIGHT',
     side: 'RIGHT',
     body: generateSuggestionBody(changes),
@@ -53118,16 +53112,13 @@ function createMultiLineComment(path, startLine, endLine, changes) {
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks.map(({ fromFileRange, changes }) => {
-    const startLine = fromFileRange.start
-    ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Start line: ${startLine}`)
-    // The last line of the chunk is the start line plus the number of lines in the chunk
-    // minus 1 to account for the start line being included in fromFileRange.lines
-    const endLine = startLine + fromFileRange.lines - 1
-    ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`End line: ${endLine}`)
-    if (endLine > startLine) {
-      return createMultiLineComment(path, startLine, endLine, changes)
+    (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${fromFileRange.start}`)
+    ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${fromFileRange.lines}`)
+    ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
+    if (fromFileRange.start === fromFileRange.lines && changes.length === 2) {
+      return createSingleLineComment(path, fromFileRange, changes)
     } else {
-      return createSingleLineComment(path, startLine, changes)
+      return createMultiLineComment(path, fromFileRange, changes)
     }
   })
 )
