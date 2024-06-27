@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.5](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.4...v1.0.5) (2024-06-27)
+
+
+### Bug Fixes
+
+* **deps:** bump @octokit/action from 6.1.0 to 7.0.0 ([#30](https://github.com/parkerbxyz/suggest-changes/issues/30)) ([77b01ff](https://github.com/parkerbxyz/suggest-changes/commit/77b01ff6a926cf69c20028f148abee77d78090f4))
+* support diffs that change single line ([#31](https://github.com/parkerbxyz/suggest-changes/issues/31)) ([f45bf47](https://github.com/parkerbxyz/suggest-changes/commit/f45bf47bb83a2b96a4fe053751de48719e3cec37))
+
 ## [1.0.4](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.3...v1.0.4) (2024-04-09)
 
 
