@@ -57,7 +57,7 @@ const generateSuggestionBody = (changes) => {
 function createSingleLineComment(path, fromFileRange, changes) {
   return {
     path,
-    lines: fromFileRange.start,
+    line: fromFileRange.start,
     body: generateSuggestionBody(changes),
   }
 }
