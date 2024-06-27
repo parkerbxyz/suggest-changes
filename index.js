@@ -79,9 +79,11 @@ function createMultiLineComment(path, startLine, endLine, changes) {
 const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks.map(({ fromFileRange, changes }) => {
     const startLine = fromFileRange.start
+    debug(`Start line: ${startLine}`)
     // The last line of the chunk is the start line plus the number of lines in the chunk
     // minus 1 to account for the start line being included in fromFileRange.lines
     const endLine = startLine + fromFileRange.lines - 1
+    debug(`End line: ${endLine}`)
     if (endLine > startLine) {
       return createMultiLineComment(path, startLine, endLine, changes)
     } else {
