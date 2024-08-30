@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.6](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.5...v1.0.6) (2024-08-30)
+
+
+### Bug Fixes
+
+* only select diff lines ([#34](https://github.com/parkerbxyz/suggest-changes/issues/34)) ([ab5a7c4](https://github.com/parkerbxyz/suggest-changes/commit/ab5a7c493c9cd0fd803fc03b7dbb0b46f0fac814))
+
 ## [1.0.5](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.4...v1.0.5) (2024-06-27)
 
 
