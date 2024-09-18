@@ -1,5 +1,3 @@
-// @ts-check
-
 import { debug, getInput } from '@actions/core'
 import { getExecOutput } from '@actions/exec'
 import { Octokit } from '@octokit/action'
@@ -71,18 +69,31 @@ function createMultiLineComment(path, fromFileRange, changes) {
   }
 }
 
+// Fetch existing review comments
+const existingComments = (
+  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
+).data
+
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks.map(({ fromFileRange, changes }) => {
     debug(`Starting line: ${fromFileRange.start}`)
     debug(`Number of lines: ${fromFileRange.lines}`)
     debug(`Changes: ${JSON.stringify(changes)}`)
-    if (fromFileRange.start === fromFileRange.lines && changes.length === 2) {
-      return createSingleLineComment(path, fromFileRange, changes)
-    } else {
-      return createMultiLineComment(path, fromFileRange, changes)
-    }
-  })
+    const newComment = fromFileRange.start === fromFileRange.lines && changes.length === 2
+      ? createSingleLineComment(path, fromFileRange, changes)
+      : createMultiLineComment(path, fromFileRange, changes)
+
+    // Check if the new comment already exists
+    const isDuplicate = existingComments.some(
+      (existingComment) =>
+        existingComment.path === newComment.path &&
+        existingComment.line === newComment.line &&
+        existingComment.body === newComment.body
+    )
+
+    return isDuplicate ? null : newComment
+  }).filter(Boolean)
 )
 
 // Create a review with the suggested changes if there are any
