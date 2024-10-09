@@ -85,12 +85,16 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       : createMultiLineComment(path, fromFileRange, changes)
 
     // Check if the new comment already exists
-    const isDuplicate = existingComments.some(
-      (existingComment) =>
+    const isDuplicate = existingComments.some((existingComment) => {
+      return (
         existingComment.path === newComment.path &&
+        existingComment.start_line === newComment.start_line &&
         existingComment.line === newComment.line &&
+        existingComment.start_side === newComment.start_side &&
+        existingComment.side === newComment.side &&
         existingComment.body === newComment.body
-    )
+      )
+    })
 
     return isDuplicate ? null : newComment
   }).filter(Boolean)
