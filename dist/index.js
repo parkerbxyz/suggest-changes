@@ -53036,8 +53036,6 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 /* harmony import */ var node_fs__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(7561);
 /* harmony import */ var node_process__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(7742);
 /* harmony import */ var parse_git_diff__WEBPACK_IMPORTED_MODULE_4__ = __nccwpck_require__(7355);
-// @ts-check
-
 
 
 
@@ -53109,18 +53107,31 @@ function createMultiLineComment(path, fromFileRange, changes) {
   }
 }
 
+// Fetch existing review comments
+const existingComments = (
+  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
+).data
+
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks.map(({ fromFileRange, changes }) => {
-    (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${fromFileRange.start}`)
+    ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${fromFileRange.start}`)
     ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${fromFileRange.lines}`)
     ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
-    if (fromFileRange.start === fromFileRange.lines && changes.length === 2) {
-      return createSingleLineComment(path, fromFileRange, changes)
-    } else {
-      return createMultiLineComment(path, fromFileRange, changes)
-    }
-  })
+    const newComment = fromFileRange.start === fromFileRange.lines && changes.length === 2
+      ? createSingleLineComment(path, fromFileRange, changes)
+      : createMultiLineComment(path, fromFileRange, changes)
+
+    // Check if the new comment already exists
+    const isDuplicate = existingComments.some(
+      (existingComment) =>
+        existingComment.path === newComment.path &&
+        existingComment.line === newComment.line &&
+        existingComment.body === newComment.body
+    )
+
+    return isDuplicate ? null : newComment
+  }).filter(Boolean)
 )
 
 // Create a review with the suggested changes if there are any
