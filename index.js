@@ -91,7 +91,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       debug(`Number of lines: ${fromFileRange.lines}`)
       debug(`Changes: ${JSON.stringify(changes)}`)
       const newComment =
-        fromFileRange.lines === 1
+        fromFileRange.lines <= 1
           ? createSingleLineComment(path, fromFileRange, changes)
           : createMultiLineComment(path, fromFileRange, changes)
 
