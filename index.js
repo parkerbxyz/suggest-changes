@@ -26,9 +26,13 @@ const pullRequestFiles = (
 ).data.map((file) => file.filename)
 
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-const diff = await getExecOutput('git', ['diff', '--unified=0', '--', ...pullRequestFiles], {
-  silent: true,
-})
+const diff = await getExecOutput(
+  'git',
+  ['diff', '--unified=0', '--', ...pullRequestFiles],
+  {
+    silent: true,
+  }
+)
 
 debug(`Diff output: ${diff.stdout}`)
 
