@@ -54079,7 +54079,7 @@ const changedFiles = parsedDiff.files.filter(
 
 const generateSuggestionBody = (changes) => {
   const suggestionBody = changes
-    .filter(({ type }) => type === 'AddedLine')
+    .filter(({ type }) => type === 'AddedLine' || type === 'UnchangedLine')
     .map(({ content }) => content)
     .join('\n')
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
