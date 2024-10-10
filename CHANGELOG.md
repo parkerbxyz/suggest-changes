@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.7](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.6...v1.0.7) (2024-10-10)
+
+
+### Bug Fixes
+
+* do not create duplicate review comments ([#38](https://github.com/parkerbxyz/suggest-changes/issues/38)) ([6417856](https://github.com/parkerbxyz/suggest-changes/commit/6417856286dbc2a7fea6ec6d01744762e6bd9b5f))
+* single line comment logic ([#45](https://github.com/parkerbxyz/suggest-changes/issues/45)) ([65a157c](https://github.com/parkerbxyz/suggest-changes/commit/65a157c51fe70f67e0e3b509f54731d495119987))
+
 ## [1.0.6](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.5...v1.0.6) (2024-08-30)
 
 
