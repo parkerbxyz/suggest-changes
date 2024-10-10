@@ -81,9 +81,9 @@ const existingComments = (
 ).data
 
 // Create an array of comments with suggested changes for each chunk of each changed file
-const comments = changedFiles.flatMap(({ path, chunks }) =>
-  chunks
-    .map(({ fromFileRange, changes }) => {
+const comments = changedFiles
+  .flatMap(({ path, chunks }) =>
+    chunks.map(({ fromFileRange, changes }) => {
       debug(`Starting line: ${fromFileRange.start}`)
       debug(`Number of lines: ${fromFileRange.lines}`)
       debug(`Changes: ${JSON.stringify(changes)}`)
@@ -102,8 +102,8 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
 
       return isDuplicate ? null : comment
     })
-    .filter(Boolean)
-)
+  )
+  .filter((comment) => comment !== null)
 
 // Create a review with the suggested changes if there are any
 if (comments.length > 0) {
