@@ -53064,9 +53064,11 @@ const pullRequestFiles = (
 ).data.map((file) => file.filename)
 
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)('git', ['diff', '--unified=0', '--', ...pullRequestFiles], {
-  silent: true,
-})
+const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
+  'git',
+  ['diff', '--unified=0', '--', ...pullRequestFiles],
+  { silent: true }
+)
 
 ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Diff output: ${diff.stdout}`)
 
@@ -53075,7 +53077,7 @@ const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_4__/* ["default"] 
 
 // Get changed files from parsedDiff (changed files have type 'ChangedFile')
 const changedFiles = parsedDiff.files.filter(
-  (/** @type {{ type: string; }} */ file) => file.type === 'ChangedFile'
+  (file) => file.type === 'ChangedFile'
 )
 
 const generateSuggestionBody = (changes) => {
@@ -53109,17 +53111,41 @@ function createMultiLineComment(path, fromFileRange, changes) {
   }
 }
 
+// Fetch existing review comments
+const existingComments = (
+  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
+).data
+
+// Function to generate a unique key for a comment
+const generateCommentKey = (comment) =>
+  `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
+    comment.body
+  }`
+
+// Create a Set of existing comment keys for faster lookup
+const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
+
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
-  chunks.map(({ fromFileRange, changes }) => {
-    (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${fromFileRange.start}`)
+  chunks.flatMap(({ fromFileRange, changes }) => {
+    ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${fromFileRange.start}`)
     ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${fromFileRange.lines}`)
     ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
-    if (fromFileRange.start === fromFileRange.lines && changes.length === 2) {
-      return createSingleLineComment(path, fromFileRange, changes)
-    } else {
-      return createMultiLineComment(path, fromFileRange, changes)
+
+    const comment =
+      fromFileRange.lines <= 1
+        ? createSingleLineComment(path, fromFileRange, changes)
+        : createMultiLineComment(path, fromFileRange, changes)
+
+    // Generate key for the new comment
+    const commentKey = generateCommentKey(comment)
+
+    // Check if the new comment already exists
+    if (existingCommentKeys.has(commentKey)) {
+      return []
     }
+
+    return [comment]
   })
 )
 

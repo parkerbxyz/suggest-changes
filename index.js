@@ -29,9 +29,7 @@ const pullRequestFiles = (
 const diff = await getExecOutput(
   'git',
   ['diff', '--unified=0', '--', ...pullRequestFiles],
-  {
-    silent: true,
-  }
+  { silent: true }
 )
 
 debug(`Diff output: ${diff.stdout}`)
@@ -75,17 +73,41 @@ function createMultiLineComment(path, fromFileRange, changes) {
   }
 }
 
+// Fetch existing review comments
+const existingComments = (
+  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
+).data
+
+// Function to generate a unique key for a comment
+const generateCommentKey = (comment) =>
+  `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
+    comment.body
+  }`
+
+// Create a Set of existing comment keys for faster lookup
+const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
+
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
-  chunks.map(({ fromFileRange, changes }) => {
+  chunks.flatMap(({ fromFileRange, changes }) => {
     debug(`Starting line: ${fromFileRange.start}`)
     debug(`Number of lines: ${fromFileRange.lines}`)
     debug(`Changes: ${JSON.stringify(changes)}`)
+
     const comment =
       fromFileRange.lines <= 1
         ? createSingleLineComment(path, fromFileRange, changes)
         : createMultiLineComment(path, fromFileRange, changes)
-    return comment
+
+    // Generate key for the new comment
+    const commentKey = generateCommentKey(comment)
+
+    // Check if the new comment already exists
+    if (existingCommentKeys.has(commentKey)) {
+      return []
+    }
+
+    return [comment]
   })
 )
 
