@@ -80,30 +80,38 @@ const existingComments = (
   await octokit.pulls.listReviewComments({ owner, repo, pull_number })
 ).data
 
+// Function to generate a unique key for a comment
+const generateCommentKey = (comment) =>
+  `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
+    comment.body
+  }`
+
+// Create a Set of existing comment keys for faster lookup
+const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
+
 // Create an array of comments with suggested changes for each chunk of each changed file
-const comments = changedFiles
-  .flatMap(({ path, chunks }) =>
-    chunks.map(({ fromFileRange, changes }) => {
-      debug(`Starting line: ${fromFileRange.start}`)
-      debug(`Number of lines: ${fromFileRange.lines}`)
-      debug(`Changes: ${JSON.stringify(changes)}`)
-      const comment =
-        fromFileRange.lines <= 1
-          ? createSingleLineComment(path, fromFileRange, changes)
-          : createMultiLineComment(path, fromFileRange, changes)
+const comments = changedFiles.flatMap(({ path, chunks }) =>
+  chunks.flatMap(({ fromFileRange, changes }) => {
+    debug(`Starting line: ${fromFileRange.start}`)
+    debug(`Number of lines: ${fromFileRange.lines}`)
+    debug(`Changes: ${JSON.stringify(changes)}`)
 
-      // Check if the new comment already exists
-      const isDuplicate = existingComments.some(
-        (existingComment) =>
-          existingComment.path === comment.path &&
-          existingComment.line === comment.line &&
-          existingComment.body === comment.body
-      )
+    const comment =
+      fromFileRange.lines <= 1
+        ? createSingleLineComment(path, fromFileRange, changes)
+        : createMultiLineComment(path, fromFileRange, changes)
 
-      return isDuplicate ? null : comment
-    })
-  )
-  .filter((comment) => comment !== null)
+    // Generate key for the new comment
+    const commentKey = generateCommentKey(comment)
+
+    // Check if the new comment already exists
+    if (existingCommentKeys.has(commentKey)) {
+      return []
+    }
+
+    return [comment]
+  })
+)
 
 // Create a review with the suggested changes if there are any
 if (comments.length > 0) {
