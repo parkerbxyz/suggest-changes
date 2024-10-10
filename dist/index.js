@@ -53067,9 +53067,7 @@ const pullRequestFiles = (
 const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
   'git',
   ['diff', '--unified=0', '--', ...pullRequestFiles],
-  {
-    silent: true,
-  }
+  { silent: true }
 )
 
 ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Diff output: ${diff.stdout}`)

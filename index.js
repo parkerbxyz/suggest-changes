@@ -29,9 +29,7 @@ const pullRequestFiles = (
 const diff = await getExecOutput(
   'git',
   ['diff', '--unified=0', '--', ...pullRequestFiles],
-  {
-    silent: true,
-  }
+  { silent: true }
 )
 
 debug(`Diff output: ${diff.stdout}`)
