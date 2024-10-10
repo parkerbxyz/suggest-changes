@@ -1,5 +1,3 @@
-// @ts-check
-
 import { debug, getInput } from '@actions/core'
 import { getExecOutput } from '@actions/exec'
 import { Octokit } from '@octokit/action'
@@ -52,7 +50,23 @@ const generateSuggestionBody = (changes) => {
   return `\`\`\`\`suggestion\n${suggestionBody}\n\`\`\`\``
 }
 
-function createSingleLineComment(path, fromFileRange, changes) {
+function isLineInDiff(line, diff) {
+  return diff.some(({ chunks }) =>
+    chunks.some(({ changes }) =>
+      changes.some(
+        (change) =>
+          change.type === 'AddedLine' && change.lineNumber === line
+      )
+    )
+  )
+}
+
+function createSingleLineComment(path, fromFileRange, changes, diff) {
+  if (!isLineInDiff(fromFileRange.start, diff)) {
+    throw new Error(
+      `Line ${fromFileRange.start} in file ${path} is not part of the diff`
+    )
+  }
   return {
     path,
     line: fromFileRange.start,
@@ -60,7 +74,17 @@ function createSingleLineComment(path, fromFileRange, changes) {
   }
 }
 
-function createMultiLineComment(path, fromFileRange, changes) {
+function createMultiLineComment(path, fromFileRange, changes, diff) {
+  if (
+    !isLineInDiff(fromFileRange.start, diff) ||
+    !isLineInDiff(fromFileRange.start + fromFileRange.lines - 1, diff)
+  ) {
+    throw new Error(
+      `Lines ${fromFileRange.start} to ${
+        fromFileRange.start + fromFileRange.lines - 1
+      } in file ${path} are not part of the diff`
+    )
+  }
   return {
     path,
     start_line: fromFileRange.start,
@@ -94,10 +118,16 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
     debug(`Number of lines: ${fromFileRange.lines}`)
     debug(`Changes: ${JSON.stringify(changes)}`)
 
-    const comment =
-      fromFileRange.lines <= 1
-        ? createSingleLineComment(path, fromFileRange, changes)
-        : createMultiLineComment(path, fromFileRange, changes)
+    let comment
+    try {
+      comment =
+        fromFileRange.lines <= 1
+          ? createSingleLineComment(path, fromFileRange, changes, parsedDiff)
+          : createMultiLineComment(path, fromFileRange, changes, parsedDiff)
+    } catch (error) {
+      debug(error.message)
+      return []
+    }
 
     // Generate key for the new comment
     const commentKey = generateCommentKey(comment)
