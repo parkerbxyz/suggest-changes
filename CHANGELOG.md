@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.8](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.7...v1.0.8) (2024-10-10)
+
+
+### Bug Fixes
+
+* **deps:** bump parse-git-diff from 0.0.15 to 0.0.16 ([#40](https://github.com/parkerbxyz/suggest-changes/issues/40)) ([c354849](https://github.com/parkerbxyz/suggest-changes/commit/c35484939d5468a93d4c281bff5fa1e67a8339ec))
+* generate diffs with one line of context ([#49](https://github.com/parkerbxyz/suggest-changes/issues/49)) ([994b05c](https://github.com/parkerbxyz/suggest-changes/commit/994b05c86015100c4eda318cb65edfad5dfc381c))
+
 ## [1.0.7](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.6...v1.0.7) (2024-10-10)
 
 
