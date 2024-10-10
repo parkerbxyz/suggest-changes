@@ -26,9 +26,13 @@ const pullRequestFiles = (
 ).data.map((file) => file.filename)
 
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-const diff = await getExecOutput('git', ['diff', '--unified=0', '--', ...pullRequestFiles], {
-  silent: true,
-})
+const diff = await getExecOutput(
+  'git',
+  ['diff', '--unified=0', '--', ...pullRequestFiles],
+  {
+    silent: true,
+  }
+)
 
 debug(`Diff output: ${diff.stdout}`)
 
@@ -37,7 +41,7 @@ const parsedDiff = parseGitDiff(diff.stdout)
 
 // Get changed files from parsedDiff (changed files have type 'ChangedFile')
 const changedFiles = parsedDiff.files.filter(
-  (/** @type {{ type: string; }} */ file) => file.type === 'ChangedFile'
+  (file) => file.type === 'ChangedFile'
 )
 
 const generateSuggestionBody = (changes) => {
