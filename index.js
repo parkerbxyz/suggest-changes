@@ -41,7 +41,7 @@ const parsedDiff = parseGitDiff(diff.stdout)
 
 // Get changed files from parsedDiff (changed files have type 'ChangedFile')
 const changedFiles = parsedDiff.files.filter(
-  (/** @type {{ type: string; }} */ file) => file.type === 'ChangedFile'
+  (file) => file.type === 'ChangedFile'
 )
 
 const generateSuggestionBody = (changes) => {
