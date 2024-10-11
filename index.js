@@ -50,7 +50,7 @@ const changedFiles = parsedDiff.files.filter(
  */
 const generateSuggestionBody = (changes) => {
   const suggestionBody = changes
-    .filter(({ type }) => type === 'AddedLine')
+    .filter(({ type }) => type === 'AddedLine' || type === 'UnchangedLine')
     .map(({ content }) => content)
     .join('\n')
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
@@ -67,15 +67,26 @@ function createSingleLineComment(path, fromFileRange, changes) {
 }
 
 function createMultiLineComment(path, fromFileRange, changes) {
+  // Filter out deleted lines
+  const filteredChanges = changes.filter(
+    ({ type }) => type === 'AddedLine' || type === 'UnchangedLine'
+  )
+
+  // Determine the new start and end lines
+  const startLine = fromFileRange.start + changes.findIndex(
+    ({ type }) => type === 'AddedLine' || type === 'UnchangedLine'
+  )
+  const endLine = fromFileRange.start + changes.length - 1 - [...changes].reverse().findIndex(
+    ({ type }) => type === 'AddedLine' || type === 'UnchangedLine'
+  )
+
   return {
     path,
-    start_line: fromFileRange.start,
-    // The last line of the chunk is the start line plus the number of lines in the chunk
-    // minus 1 to account for the start line being included in fromFileRange.lines
-    line: fromFileRange.start + fromFileRange.lines - 1,
+    start_line: startLine,
+    line: endLine,
     start_side: 'RIGHT',
     side: 'RIGHT',
-    body: generateSuggestionBody(changes),
+    body: generateSuggestionBody(filteredChanges),
   }
 }
 
