@@ -42,9 +42,15 @@ const changedFiles = parsedDiff.files.filter(
   (file) => file.type === 'ChangedFile'
 )
 
+/**
+ * Generates a suggestion body for GitHub comments from an array of line changes.
+ *
+ * @param {import("parse-git-diff").AnyLineChange[]} changes - An array of line changes.
+ * @returns {string} The formatted suggestion body as a string.
+ */
 const generateSuggestionBody = (changes) => {
   const suggestionBody = changes
-    .filter(({ type }) => type === 'AddedLine' || type === 'UnchangedLine')
+    .filter(({ type }) => type === 'AddedLine')
     .map(({ content }) => content)
     .join('\n')
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
