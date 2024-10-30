@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.8...v2.0.0) (2024-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* Changes the default pull request review action from `REQUEST_CHANGES` to `COMMENT`.
+
+### Features
+
+* Add pull request review event input ([#51](https://github.com/parkerbxyz/suggest-changes/issues/51)) ([12a43fe](https://github.com/parkerbxyz/suggest-changes/commit/12a43fe109109fb30da138552a09110aaa05fbc2))
+
 ## [1.0.8](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.7...v1.0.8) (2024-10-10)
 
 
