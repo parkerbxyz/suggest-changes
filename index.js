@@ -117,7 +117,7 @@ if (comments.length > 0) {
     owner,
     repo,
     pull_number,
-    event: 'REQUEST_CHANGES',
+    event: getInput('event').toUpperCase,
     body: getInput('comment'),
     comments,
   })

@@ -35,6 +35,7 @@ jobs:
       - uses: parkerbxyz/suggest-changes@v1
         with:
           comment: 'Please commit the suggested changes from markdownlint.'
+          event: 'REQUEST_CHANGES'
 ```
 
 > [!NOTE]

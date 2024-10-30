@@ -10,6 +10,9 @@ inputs:
     default: ${{ github.token }}
   comment:
     description: The pull request review comment
+  event:
+    description: The review action you want to perform. The review actions include: APPROVE, REQUEST_CHANGES, or COMMENT.
+    default: 'COMMENT'
 runs:
   using: 'node20'
   main: 'dist/index.js'
