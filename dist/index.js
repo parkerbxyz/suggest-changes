@@ -53155,9 +53155,7 @@ if (comments.length > 0) {
     owner,
     repo,
     pull_number,
-    event: /** @type {"APPROVE" | "REQUEST_CHANGES" | "COMMENT"} */ (
-      (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('event').toUpperCase()
-    ),
+    event: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('event').toUpperCase(),
     body: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment'),
     comments,
   })

@@ -117,9 +117,7 @@ if (comments.length > 0) {
     owner,
     repo,
     pull_number,
-    event: /** @type {"APPROVE" | "REQUEST_CHANGES" | "COMMENT"} */ (
-      getInput('event').toUpperCase()
-    ),
+    event: getInput('event').toUpperCase(),
     body: getInput('comment'),
     comments,
   })
