@@ -94,10 +94,24 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
     debug(`Number of lines: ${fromFileRange.lines}`)
     debug(`Changes: ${JSON.stringify(changes)}`)
 
+    // Trim deleted lines from the beginning or end of diffs
+    let startIndex = 0
+    let endIndex = changes.length - 1
+
+    while (startIndex <= endIndex && changes[startIndex].type === 'DeletedLine') {
+      startIndex++
+    }
+
+    while (endIndex >= startIndex && changes[endIndex].type === 'DeletedLine') {
+      endIndex--
+    }
+
+    const trimmedChanges = changes.slice(startIndex, endIndex + 1)
+
     const comment =
       fromFileRange.lines <= 1
-        ? createSingleLineComment(path, fromFileRange, changes)
-        : createMultiLineComment(path, fromFileRange, changes)
+        ? createSingleLineComment(path, fromFileRange, trimmedChanges)
+        : createMultiLineComment(path, fromFileRange, trimmedChanges)
 
     // Generate key for the new comment
     const commentKey = generateCommentKey(comment)
