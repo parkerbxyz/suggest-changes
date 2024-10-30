@@ -1,15 +1,18 @@
 ---
 name: 'Suggest Changes Action'
-description: 'Create review suggestions from working directory changes'
+description: 'Create review suggestions from working directory changes.'
 branding:
   icon: 'git-pull-request'
   color: 'white'
 inputs:
   token:
-    description: Access token to make authenticated API calls
+    description: 'Access token to make authenticated API calls.'
     default: ${{ github.token }}
   comment:
-    description: The pull request review comment
+    description: 'The pull request review comment.'
+  event:
+    description: 'The review action you want to perform. The review actions include: APPROVE, REQUEST_CHANGES, or COMMENT.'
+    default: 'COMMENT'
 runs:
   using: 'node20'
   main: 'dist/index.js'
