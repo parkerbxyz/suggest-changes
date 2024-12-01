@@ -12,8 +12,8 @@
   },
   "devDependencies": {
     "@octokit/webhooks-types": "^7.6.1",
-    "@types/node": "^22.7.5",
-    "@vercel/ncc": "^0.38.2"
+    "@types/node": "^22.10.1",
+    "@vercel/ncc": "^0.38.3"
   },
   "prettier": {
     "semi": false,
