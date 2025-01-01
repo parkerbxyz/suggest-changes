@@ -8,7 +8,7 @@
     "@actions/core": "^1.10.0",
     "@actions/exec": "^1.1.1",
     "@octokit/action": "^7.0.0",
-    "parse-git-diff": "^0.0.16"
+    "parse-git-diff": "^0.0.17"
   },
   "devDependencies": {
     "@octokit/webhooks-types": "^7.6.1",
