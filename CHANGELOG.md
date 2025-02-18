@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.0.1](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.0...v2.0.1) (2025-02-18)
+
+
+### Bug Fixes
+
+* **deps:** bump @actions/core from 1.10.1 to 1.11.1 ([#54](https://github.com/parkerbxyz/suggest-changes/issues/54)) ([5956d57](https://github.com/parkerbxyz/suggest-changes/commit/5956d57522bccf7bca944b66fd620c4456ba1c6a))
+* **deps:** bump @octokit/request-error in the npm_and_yarn group ([#59](https://github.com/parkerbxyz/suggest-changes/issues/59)) ([459712e](https://github.com/parkerbxyz/suggest-changes/commit/459712ee6d904111222530ad28ff6cd8a4218e56))
+* **deps:** bump parse-git-diff from 0.0.16 to 0.0.17 ([#56](https://github.com/parkerbxyz/suggest-changes/issues/56)) ([e512b94](https://github.com/parkerbxyz/suggest-changes/commit/e512b942606c6d2f610591e04aec16381be5cc24))
+
 ## [2.0.0](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.8...v2.0.0) (2024-10-30)
 
 
