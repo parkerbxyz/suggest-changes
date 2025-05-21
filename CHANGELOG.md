@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.0.1](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.0...v2.0.1) (2025-05-21)
+
+
+### Bug Fixes
+
+* **deps:** bump @actions/core from 1.10.1 to 1.11.1 ([#54](https://github.com/parkerbxyz/suggest-changes/issues/54)) ([5956d57](https://github.com/parkerbxyz/suggest-changes/commit/5956d57522bccf7bca944b66fd620c4456ba1c6a))
+* **deps:** bump @octokit/action from 7.0.0 to 7.0.2 ([#65](https://github.com/parkerbxyz/suggest-changes/issues/65)) ([f28cbc6](https://github.com/parkerbxyz/suggest-changes/commit/f28cbc6561399ec729ee3ed5a9623619f44961c0))
+* **deps:** bump @octokit/action from 7.0.2 to 8.0.1 ([#67](https://github.com/parkerbxyz/suggest-changes/issues/67)) ([3cb876e](https://github.com/parkerbxyz/suggest-changes/commit/3cb876e81b6c58f1008f67f81bc2fd5c7f14af0f))
+* **deps:** bump @octokit/request-error in the npm_and_yarn group ([#59](https://github.com/parkerbxyz/suggest-changes/issues/59)) ([459712e](https://github.com/parkerbxyz/suggest-changes/commit/459712ee6d904111222530ad28ff6cd8a4218e56))
+* **deps:** bump parse-git-diff from 0.0.16 to 0.0.17 ([#56](https://github.com/parkerbxyz/suggest-changes/issues/56)) ([e512b94](https://github.com/parkerbxyz/suggest-changes/commit/e512b942606c6d2f610591e04aec16381be5cc24))
+* **deps:** bump parse-git-diff from 0.0.17 to 0.0.19 ([#66](https://github.com/parkerbxyz/suggest-changes/issues/66)) ([be08133](https://github.com/parkerbxyz/suggest-changes/commit/be0813317ed5d5a000a78a339576d98ef17fb650))
+* **deps:** bump undici from 5.28.4 to 5.29.0 in the npm_and_yarn group ([#68](https://github.com/parkerbxyz/suggest-changes/issues/68)) ([815b64b](https://github.com/parkerbxyz/suggest-changes/commit/815b64b76a8e8e3439f2c74091ca665b8ff73656))
+
 ## [2.0.0](https://github.com/parkerbxyz/suggest-changes/compare/v1.0.8...v2.0.0) (2024-10-30)
 
 
