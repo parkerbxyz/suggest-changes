@@ -52,21 +52,21 @@ const generateSuggestionBody = (changes) => {
   return `\`\`\`\`suggestion\n${suggestionBody}\n\`\`\`\``
 }
 
-function createSingleLineComment(path, fromFileRange, changes) {
+function createSingleLineComment(path, toFileRange, changes) {
   return {
     path,
-    line: fromFileRange.start,
+    line: toFileRange.start,
     body: generateSuggestionBody(changes),
   }
 }
 
-function createMultiLineComment(path, fromFileRange, changes) {
+function createMultiLineComment(path, toFileRange, changes) {
   return {
     path,
-    start_line: fromFileRange.start,
+    start_line: toFileRange.start,
     // The last line of the chunk is the start line plus the number of lines in the chunk
-    // minus 1 to account for the start line being included in fromFileRange.lines
-    line: fromFileRange.start + fromFileRange.lines - 1,
+    // minus 1 to account for the start line being included in toFileRange.lines
+    line: toFileRange.start + toFileRange.lines - 1,
     start_side: 'RIGHT',
     side: 'RIGHT',
     body: generateSuggestionBody(changes),
@@ -89,15 +89,25 @@ const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
-  chunks.flatMap(({ fromFileRange, changes }) => {
-    debug(`Starting line: ${fromFileRange.start}`)
-    debug(`Number of lines: ${fromFileRange.lines}`)
+  chunks.flatMap(({ toFileRange, changes }) => {
+    debug(`Starting line: ${toFileRange.start}`)
+    debug(`Number of lines: ${toFileRange.lines}`)
     debug(`Changes: ${JSON.stringify(changes)}`)
 
+    // Skip chunks that only contain deletions (no suggestions possible)
+    const hasNonDeletedContent = changes.some(change => 
+      change.type === 'AddedLine' || change.type === 'UnchangedLine'
+    );
+    
+    if (!hasNonDeletedContent) {
+      debug('Skipping chunk with only deletions')
+      return []
+    }
+
     const comment =
-      fromFileRange.lines <= 1
-        ? createSingleLineComment(path, fromFileRange, changes)
-        : createMultiLineComment(path, fromFileRange, changes)
+      toFileRange.lines <= 1
+        ? createSingleLineComment(path, toFileRange, changes)
+        : createMultiLineComment(path, toFileRange, changes)
 
     // Generate key for the new comment
     const commentKey = generateCommentKey(comment)
