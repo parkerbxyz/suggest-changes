@@ -54590,21 +54590,40 @@ const generateSuggestionBody = (changes) => {
   return `\`\`\`\`suggestion\n${suggestionBody}\n\`\`\`\``
 }
 
+const getSuggestionLineRange = (changes) => {
+  // Filter changes to only include lines that will be in the suggestion body
+  const suggestionChanges = changes.filter(({ type }) => type === 'AddedLine' || type === 'UnchangedLine')
+  
+  // Get line numbers from the new file (lineAfter) for the suggestion
+  const lineNumbers = suggestionChanges
+    .map(change => change.lineAfter)
+    .filter(line => line !== undefined)
+  
+  if (lineNumbers.length === 0) {
+    throw new Error('No valid line numbers found for suggestion')
+  }
+  
+  const startLine = Math.min(...lineNumbers)
+  const endLine = Math.max(...lineNumbers)
+  
+  return { startLine, endLine, lineCount: endLine - startLine + 1 }
+}
+
 function createSingleLineComment(path, fromFileRange, changes) {
+  const { startLine } = getSuggestionLineRange(changes)
   return {
     path,
-    line: fromFileRange.start,
+    line: startLine,
     body: generateSuggestionBody(changes),
   }
 }
 
 function createMultiLineComment(path, fromFileRange, changes) {
+  const { startLine, endLine } = getSuggestionLineRange(changes)
   return {
     path,
-    start_line: fromFileRange.start,
-    // The last line of the chunk is the start line plus the number of lines in the chunk
-    // minus 1 to account for the start line being included in fromFileRange.lines
-    line: fromFileRange.start + fromFileRange.lines - 1,
+    start_line: startLine,
+    line: endLine,
     start_side: 'RIGHT',
     side: 'RIGHT',
     body: generateSuggestionBody(changes),
@@ -54632,8 +54651,11 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
     ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${fromFileRange.lines}`)
     ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
 
+    // Calculate the line range for the suggestion based on the content that will be included
+    const { lineCount } = getSuggestionLineRange(changes)
+    
     const comment =
-      fromFileRange.lines <= 1
+      lineCount <= 1
         ? createSingleLineComment(path, fromFileRange, changes)
         : createMultiLineComment(path, fromFileRange, changes)
 
