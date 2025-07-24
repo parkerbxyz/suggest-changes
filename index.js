@@ -87,7 +87,9 @@ export const generateCommentKey = (comment) =>
 export function validateEvent(event) {
   const allowedEvents = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT']
   if (!allowedEvents.includes(event)) {
-    throw new Error(`Invalid event: ${event}. Allowed values are ${allowedEvents.join(', ')}.`)
+    throw new Error(
+      `Invalid event: ${event}. Allowed values are ${allowedEvents.join(', ')}.`
+    )
   }
   return /** @type {"APPROVE" | "REQUEST_CHANGES" | "COMMENT"} */ (event)
 }
