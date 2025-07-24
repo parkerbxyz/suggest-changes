@@ -2,7 +2,8 @@
   "description": "A GitHub Action for turning working directory changes into pull request review suggestions",
   "type": "module",
   "scripts": {
-    "build": "ncc build"
+    "build": "ncc build",
+    "test": "node --test"
   },
   "dependencies": {
     "@actions/core": "^1.11.1",
