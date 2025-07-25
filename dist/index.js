@@ -54101,19 +54101,9 @@ module.exports = parseParams
 /***/ }),
 
 /***/ 3473:
-/***/ ((__webpack_module__, __webpack_exports__, __nccwpck_require__) => {
+/***/ ((__webpack_module__, __unused_webpack___webpack_exports__, __nccwpck_require__) => {
 
 __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependencies__, __webpack_async_result__) => { try {
-/* harmony export */ __nccwpck_require__.d(__webpack_exports__, {
-/* harmony export */   $r: () => (/* binding */ validateEvent),
-/* harmony export */   Ce: () => (/* binding */ hasNonDeletedContent),
-/* harmony export */   E_: () => (/* binding */ generateCommentKey),
-/* harmony export */   MW: () => (/* binding */ generateSuggestionBody),
-/* harmony export */   eF: () => (/* binding */ run),
-/* harmony export */   lR: () => (/* binding */ processChunk),
-/* harmony export */   qU: () => (/* binding */ createSingleLineComment),
-/* harmony export */   rz: () => (/* binding */ createMultiLineComment)
-/* harmony export */ });
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(2440);
 /* harmony import */ var _actions_exec__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(8513);
 /* harmony import */ var _octokit_action__WEBPACK_IMPORTED_MODULE_5__ = __nccwpck_require__(5976);
@@ -54130,11 +54120,40 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 
 
 
-/**
- * Generate suggestion body from changes, filtering out deleted lines
- * @param {Array} changes - Array of change objects with type and content
- * @returns {string} - Formatted suggestion body
- */
+const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_5__/* .Octokit */ .Eg({
+  userAgent: 'suggest-changes',
+})
+
+const [owner, repo] = String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_REPOSITORY).split('/')
+
+/** @type {import("@octokit/webhooks-types").PullRequestEvent} */
+const eventPayload = JSON.parse(
+  (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_EVENT_PATH), 'utf8')
+)
+
+const pull_number = Number(eventPayload.pull_request.number)
+
+const pullRequestFiles = (
+  await octokit.pulls.listFiles({ owner, repo, pull_number })
+).data.map((file) => file.filename)
+
+// Get the diff between the head branch and the base branch (limit to the files in the pull request)
+const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
+  'git',
+  ['diff', '--unified=1', '--', ...pullRequestFiles],
+  { silent: true }
+)
+
+;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Diff output: ${diff.stdout}`)
+
+// Create an array of changes from the diff output based on patches
+const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_4__/* ["default"] */ .A)(diff.stdout)
+
+// Get changed files from parsedDiff (changed files have type 'ChangedFile')
+const changedFiles = parsedDiff.files.filter(
+  (file) => file.type === 'ChangedFile'
+)
+
 const generateSuggestionBody = (changes) => {
   const suggestionBody = changes
     .filter(({ type }) => type === 'AddedLine' || type === 'UnchangedLine')
@@ -54145,13 +54164,6 @@ const generateSuggestionBody = (changes) => {
   return `\`\`\`\`suggestion\n${suggestionBody}\n\`\`\`\``
 }
 
-/**
- * Create a single line comment
- * @param {string} path - File path
- * @param {Object} toFileRange - Range in the current file state
- * @param {Array} changes - Array of changes
- * @returns {Object} - Comment object for GitHub API
- */
 function createSingleLineComment(path, toFileRange, changes) {
   return {
     path,
@@ -54160,13 +54172,6 @@ function createSingleLineComment(path, toFileRange, changes) {
   }
 }
 
-/**
- * Create a multi-line comment
- * @param {string} path - File path
- * @param {Object} toFileRange - Range in the current file state
- * @param {Array} changes - Array of changes
- * @returns {Object} - Comment object for GitHub API
- */
 function createMultiLineComment(path, toFileRange, changes) {
   return {
     path,
@@ -54180,149 +54185,64 @@ function createMultiLineComment(path, toFileRange, changes) {
   }
 }
 
-/**
- * Check if changes contain non-deleted content
- * @param {Array} changes - Array of change objects
- * @returns {boolean} - True if there are AddedLine or UnchangedLine changes
- */
-function hasNonDeletedContent(changes) {
-  return changes.some(
-    (change) => change.type === 'AddedLine' || change.type === 'UnchangedLine'
-  )
-}
+// Fetch existing review comments
+const existingComments = (
+  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
+).data
 
-/**
- * Generate a unique key for a comment
- * @param {Object} comment - Comment object
- * @returns {string} - Unique comment key
- */
+// Function to generate a unique key for a comment
 const generateCommentKey = (comment) =>
   `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
     comment.body
   }`
 
-/**
- * Validates the event value to ensure it matches one of the allowed types
- * @param {string} event - The event value to validate
- * @returns {"APPROVE" | "REQUEST_CHANGES" | "COMMENT"} - The validated event value
- */
-function validateEvent(event) {
-  const allowedEvents = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT']
-  if (!allowedEvents.includes(event)) {
-    throw new Error(`Invalid event: ${event}. Allowed values are ${allowedEvents.join(', ')}.`)
-  }
-  return /** @type {"APPROVE" | "REQUEST_CHANGES" | "COMMENT"} */ (event)
-}
+// Create a Set of existing comment keys for faster lookup
+const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 
-/**
- * Process a chunk and create a comment if valid
- * @param {string} path - File path
- * @param {Object} chunk - Chunk object
- * @param {Set} existingCommentKeys - Set of existing comment keys
- * @returns {Array} - Array containing comment or empty array
- */
-function processChunk(path, chunk, existingCommentKeys) {
-  // Check if the chunk has changes property
-  if (!('changes' in chunk) || !chunk.toFileRange) {
-    return []
-  }
+// Create an array of comments with suggested changes for each chunk of each changed file
+const comments = changedFiles.flatMap(({ path, chunks }) =>
+  chunks.flatMap(({ toFileRange, changes }) => {
+    ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${toFileRange.start}`)
+    ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${toFileRange.lines}`)
+    ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
 
-  const { toFileRange, changes } = chunk
+    // Skip chunks that only contain deletions (no suggestions possible)
+    const hasNonDeletedContent = changes.some(change => 
+      change.type === 'AddedLine' || change.type === 'UnchangedLine'
+    );
+    
+    if (!hasNonDeletedContent) {
+      (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)('Skipping chunk with only deletions')
+      return []
+    }
 
-  ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${toFileRange.start}`)
-  ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${toFileRange.lines}`)
-  ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
+    const comment =
+      toFileRange.lines <= 1
+        ? createSingleLineComment(path, toFileRange, changes)
+        : createMultiLineComment(path, toFileRange, changes)
 
-  // Skip chunks that only contain deletions (no suggestions possible)
-  if (!hasNonDeletedContent(changes)) {
-    (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)('Skipping chunk with only deletions')
-    return []
-  }
+    // Generate key for the new comment
+    const commentKey = generateCommentKey(comment)
 
-  const comment =
-    toFileRange.lines <= 1
-      ? createSingleLineComment(path, toFileRange, changes)
-      : createMultiLineComment(path, toFileRange, changes)
+    // Check if the new comment already exists
+    if (existingCommentKeys.has(commentKey)) {
+      return []
+    }
 
-  // Generate key for the new comment
-  const commentKey = generateCommentKey(comment)
-
-  // Check if the new comment already exists
-  if (existingCommentKeys.has(commentKey)) {
-    return []
-  }
-
-  return [comment]
-}
-
-/**
- * Main execution function
- */
-async function run() {
-  const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_5__/* .Octokit */ .Eg({
-    userAgent: 'suggest-changes',
+    return [comment]
   })
+)
 
-  const [owner, repo] = String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_REPOSITORY).split('/')
-
-  /** @type {import("@octokit/webhooks-types").PullRequestEvent} */
-  const eventPayload = JSON.parse(
-    (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_EVENT_PATH), 'utf8')
-  )
-
-  const pull_number = Number(eventPayload.pull_request.number)
-
-  const pullRequestFiles = (
-    await octokit.pulls.listFiles({ owner, repo, pull_number })
-  ).data.map((file) => file.filename)
-
-  // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-  const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
-    'git',
-    ['diff', '--unified=1', '--', ...pullRequestFiles],
-    { silent: true }
-  )
-
-  ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Diff output: ${diff.stdout}`)
-
-  // Create an array of changes from the diff output based on patches
-  const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_4__/* ["default"] */ .A)(diff.stdout)
-
-  // Get changed files from parsedDiff (changed files have type 'ChangedFile')
-  const changedFiles = parsedDiff.files.filter(
-    (file) => file.type === 'ChangedFile'
-  )
-
-  // Fetch existing review comments
-  const existingComments = (
-    await octokit.pulls.listReviewComments({ owner, repo, pull_number })
-  ).data
-
-  // Create a Set of existing comment keys for faster lookup
-  const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
-
-  // Create an array of comments with suggested changes for each chunk of each changed file
-  const comments = changedFiles.flatMap(({ path, chunks }) =>
-    chunks.flatMap((chunk) => processChunk(path, chunk, existingCommentKeys))
-  )
-
-  // Create a review with the suggested changes if there are any
-  if (comments.length > 0) {
-    const event = validateEvent((0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('event').toUpperCase() || 'COMMENT')
-    await octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number,
-      event,
-      body: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment'),
-      comments,
-    })
-  }
-}
-
-// Run the main function when this file is executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  await run()
+// Create a review with the suggested changes if there are any
+if (comments.length > 0) {
+  await octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number,
+    event: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('event').toUpperCase(),
+    body: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment'),
+    comments,
+  })
 }
 
 __webpack_async_result__();
@@ -58440,13 +58360,4 @@ function getFilePath(ctx, input, type) {
 /******/ // This entry module used 'module' so it can't be inlined
 /******/ var __webpack_exports__ = __nccwpck_require__(3473);
 /******/ __webpack_exports__ = await __webpack_exports__;
-/******/ var __webpack_exports__createMultiLineComment = __webpack_exports__.rz;
-/******/ var __webpack_exports__createSingleLineComment = __webpack_exports__.qU;
-/******/ var __webpack_exports__generateCommentKey = __webpack_exports__.E_;
-/******/ var __webpack_exports__generateSuggestionBody = __webpack_exports__.MW;
-/******/ var __webpack_exports__hasNonDeletedContent = __webpack_exports__.Ce;
-/******/ var __webpack_exports__processChunk = __webpack_exports__.lR;
-/******/ var __webpack_exports__run = __webpack_exports__.eF;
-/******/ var __webpack_exports__validateEvent = __webpack_exports__.$r;
-/******/ export { __webpack_exports__createMultiLineComment as createMultiLineComment, __webpack_exports__createSingleLineComment as createSingleLineComment, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__hasNonDeletedContent as hasNonDeletedContent, __webpack_exports__processChunk as processChunk, __webpack_exports__run as run, __webpack_exports__validateEvent as validateEvent };
 /******/ 

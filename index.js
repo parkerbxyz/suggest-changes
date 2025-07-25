@@ -8,12 +8,41 @@ import { readFileSync } from 'node:fs'
 import { env } from 'node:process'
 import parseGitDiff from 'parse-git-diff'
 
-/**
- * Generate suggestion body from changes, filtering out deleted lines
- * @param {Array} changes - Array of change objects with type and content
- * @returns {string} - Formatted suggestion body
- */
-export const generateSuggestionBody = (changes) => {
+const octokit = new Octokit({
+  userAgent: 'suggest-changes',
+})
+
+const [owner, repo] = String(env.GITHUB_REPOSITORY).split('/')
+
+/** @type {import("@octokit/webhooks-types").PullRequestEvent} */
+const eventPayload = JSON.parse(
+  readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
+)
+
+const pull_number = Number(eventPayload.pull_request.number)
+
+const pullRequestFiles = (
+  await octokit.pulls.listFiles({ owner, repo, pull_number })
+).data.map((file) => file.filename)
+
+// Get the diff between the head branch and the base branch (limit to the files in the pull request)
+const diff = await getExecOutput(
+  'git',
+  ['diff', '--unified=1', '--', ...pullRequestFiles],
+  { silent: true }
+)
+
+debug(`Diff output: ${diff.stdout}`)
+
+// Create an array of changes from the diff output based on patches
+const parsedDiff = parseGitDiff(diff.stdout)
+
+// Get changed files from parsedDiff (changed files have type 'ChangedFile')
+const changedFiles = parsedDiff.files.filter(
+  (file) => file.type === 'ChangedFile'
+)
+
+const generateSuggestionBody = (changes) => {
   const suggestionBody = changes
     .filter(({ type }) => type === 'AddedLine' || type === 'UnchangedLine')
     .map(({ content }) => content)
@@ -23,14 +52,7 @@ export const generateSuggestionBody = (changes) => {
   return `\`\`\`\`suggestion\n${suggestionBody}\n\`\`\`\``
 }
 
-/**
- * Create a single line comment
- * @param {string} path - File path
- * @param {Object} toFileRange - Range in the current file state
- * @param {Array} changes - Array of changes
- * @returns {Object} - Comment object for GitHub API
- */
-export function createSingleLineComment(path, toFileRange, changes) {
+function createSingleLineComment(path, toFileRange, changes) {
   return {
     path,
     line: toFileRange.start,
@@ -38,14 +60,7 @@ export function createSingleLineComment(path, toFileRange, changes) {
   }
 }
 
-/**
- * Create a multi-line comment
- * @param {string} path - File path
- * @param {Object} toFileRange - Range in the current file state
- * @param {Array} changes - Array of changes
- * @returns {Object} - Comment object for GitHub API
- */
-export function createMultiLineComment(path, toFileRange, changes) {
+function createMultiLineComment(path, toFileRange, changes) {
   return {
     path,
     start_line: toFileRange.start,
@@ -58,149 +73,62 @@ export function createMultiLineComment(path, toFileRange, changes) {
   }
 }
 
-/**
- * Check if changes contain non-deleted content
- * @param {Array} changes - Array of change objects
- * @returns {boolean} - True if there are AddedLine or UnchangedLine changes
- */
-export function hasNonDeletedContent(changes) {
-  return changes.some(
-    (change) => change.type === 'AddedLine' || change.type === 'UnchangedLine'
-  )
-}
+// Fetch existing review comments
+const existingComments = (
+  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
+).data
 
-/**
- * Generate a unique key for a comment
- * @param {Object} comment - Comment object
- * @returns {string} - Unique comment key
- */
-export const generateCommentKey = (comment) =>
+// Function to generate a unique key for a comment
+const generateCommentKey = (comment) =>
   `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
     comment.body
   }`
 
-/**
- * Validates the event value to ensure it matches one of the allowed types
- * @param {string} event - The event value to validate
- * @returns {"APPROVE" | "REQUEST_CHANGES" | "COMMENT"} - The validated event value
- */
-export function validateEvent(event) {
-  const allowedEvents = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT']
-  if (!allowedEvents.includes(event)) {
-    throw new Error(
-      `Invalid event: ${event}. Allowed values are ${allowedEvents.join(', ')}.`
-    )
-  }
-  return /** @type {"APPROVE" | "REQUEST_CHANGES" | "COMMENT"} */ (event)
-}
+// Create a Set of existing comment keys for faster lookup
+const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 
-/**
- * Process a chunk and create a comment if valid
- * @param {string} path - File path
- * @param {Object} chunk - Chunk object
- * @param {Set} existingCommentKeys - Set of existing comment keys
- * @returns {Array} - Array containing comment or empty array
- */
-export function processChunk(path, chunk, existingCommentKeys) {
-  // Check if the chunk has changes property
-  if (!('changes' in chunk) || !chunk.toFileRange) {
-    return []
-  }
+// Create an array of comments with suggested changes for each chunk of each changed file
+const comments = changedFiles.flatMap(({ path, chunks }) =>
+  chunks.flatMap(({ toFileRange, changes }) => {
+    debug(`Starting line: ${toFileRange.start}`)
+    debug(`Number of lines: ${toFileRange.lines}`)
+    debug(`Changes: ${JSON.stringify(changes)}`)
 
-  const { toFileRange, changes } = chunk
+    // Skip chunks that only contain deletions (no suggestions possible)
+    const hasNonDeletedContent = changes.some(change => 
+      change.type === 'AddedLine' || change.type === 'UnchangedLine'
+    );
+    
+    if (!hasNonDeletedContent) {
+      debug('Skipping chunk with only deletions')
+      return []
+    }
 
-  debug(`Starting line: ${toFileRange.start}`)
-  debug(`Number of lines: ${toFileRange.lines}`)
-  debug(`Changes: ${JSON.stringify(changes)}`)
+    const comment =
+      toFileRange.lines <= 1
+        ? createSingleLineComment(path, toFileRange, changes)
+        : createMultiLineComment(path, toFileRange, changes)
 
-  // Skip chunks that only contain deletions (no suggestions possible)
-  if (!hasNonDeletedContent(changes)) {
-    debug('Skipping chunk with only deletions')
-    return []
-  }
+    // Generate key for the new comment
+    const commentKey = generateCommentKey(comment)
 
-  const comment =
-    toFileRange.lines <= 1
-      ? createSingleLineComment(path, toFileRange, changes)
-      : createMultiLineComment(path, toFileRange, changes)
+    // Check if the new comment already exists
+    if (existingCommentKeys.has(commentKey)) {
+      return []
+    }
 
-  // Generate key for the new comment
-  const commentKey = generateCommentKey(comment)
-
-  // Check if the new comment already exists
-  if (existingCommentKeys.has(commentKey)) {
-    return []
-  }
-
-  return [comment]
-}
-
-/**
- * Main execution function
- */
-export async function run() {
-  const octokit = new Octokit({
-    userAgent: 'suggest-changes',
+    return [comment]
   })
+)
 
-  const [owner, repo] = String(env.GITHUB_REPOSITORY).split('/')
-
-  /** @type {import("@octokit/webhooks-types").PullRequestEvent} */
-  const eventPayload = JSON.parse(
-    readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
-  )
-
-  const pull_number = Number(eventPayload.pull_request.number)
-
-  const pullRequestFiles = (
-    await octokit.pulls.listFiles({ owner, repo, pull_number })
-  ).data.map((file) => file.filename)
-
-  // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-  const diff = await getExecOutput(
-    'git',
-    ['diff', '--unified=1', '--', ...pullRequestFiles],
-    { silent: true }
-  )
-
-  debug(`Diff output: ${diff.stdout}`)
-
-  // Create an array of changes from the diff output based on patches
-  const parsedDiff = parseGitDiff(diff.stdout)
-
-  // Get changed files from parsedDiff (changed files have type 'ChangedFile')
-  const changedFiles = parsedDiff.files.filter(
-    (file) => file.type === 'ChangedFile'
-  )
-
-  // Fetch existing review comments
-  const existingComments = (
-    await octokit.pulls.listReviewComments({ owner, repo, pull_number })
-  ).data
-
-  // Create a Set of existing comment keys for faster lookup
-  const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
-
-  // Create an array of comments with suggested changes for each chunk of each changed file
-  const comments = changedFiles.flatMap(({ path, chunks }) =>
-    chunks.flatMap((chunk) => processChunk(path, chunk, existingCommentKeys))
-  )
-
-  // Create a review with the suggested changes if there are any
-  if (comments.length > 0) {
-    const event = validateEvent(getInput('event').toUpperCase() || 'COMMENT')
-    await octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number,
-      event,
-      body: getInput('comment'),
-      comments,
-    })
-  }
-}
-
-// Run the main function when this file is executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  await run()
+// Create a review with the suggested changes if there are any
+if (comments.length > 0) {
+  await octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number,
+    event: getInput('event').toUpperCase(),
+    body: getInput('comment'),
+    comments,
+  })
 }
