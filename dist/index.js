@@ -54172,19 +54172,6 @@ function createSingleLineComment(path, fromFileRange, changes) {
   }
 }
 
-function createMultiLineComment(path, fromFileRange, changes) {
-  return {
-    path,
-    start_line: fromFileRange.start,
-    // The last line of the chunk is the start line plus the number of lines in the chunk
-    // minus 1 to account for the start line being included in fromFileRange.lines
-    line: fromFileRange.start + fromFileRange.lines - 1,
-    start_side: 'RIGHT',
-    side: 'RIGHT',
-    body: generateSuggestionBody(changes),
-  }
-}
-
 // Fetch existing review comments
 const existingComments = (
   await octokit.pulls.listReviewComments({ owner, repo, pull_number })
@@ -54206,10 +54193,8 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
     ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${fromFileRange.lines}`)
     ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
 
-    const comment =
-      fromFileRange.lines <= 1
-        ? createSingleLineComment(path, fromFileRange, changes)
-        : createMultiLineComment(path, fromFileRange, changes)
+    // With --unified=0, always create single line comments to avoid hunk boundary issues
+    const comment = createSingleLineComment(path, fromFileRange, changes)
 
     // Generate key for the new comment
     const commentKey = generateCommentKey(comment)
