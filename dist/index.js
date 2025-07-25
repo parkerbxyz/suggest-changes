@@ -54580,12 +54580,24 @@ const changedFiles = parsedDiff.files.filter(
   (file) => file.type === 'ChangedFile'
 )
 
+const createSuggestion = (content) => {
+  // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
+  // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
+  return `\`\`\`\`suggestion\n${content}\n\`\`\`\``
+}
+
 const generateSuggestionBody = (changes) => {
   const addedLines = changes.filter(({ type }) => type === 'AddedLine')
   const removedLines = changes.filter(({ type }) => type === 'RemovedLine')
 
+  // Handle pure deletions (only removed lines)
+  if (addedLines.length === 0 && removedLines.length > 0) {
+    // For deletions, suggest empty content (which will delete the lines)
+    return createSuggestion('')
+  }
+
   if (addedLines.length === 0) {
-    return null // No added lines to suggest
+    return null // No changes to suggest
   }
 
   // If we have both added and removed lines, only suggest lines that are actually different
@@ -54601,9 +54613,10 @@ const generateSuggestionBody = (changes) => {
   }
 
   const suggestionBody = linesToSuggest.map(({ content }) => content).join('\n')
-  // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
-  // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
-  return `\`\`\`\`suggestion\n${suggestionBody}\n\`\`\`\``
+  return {
+    body: createSuggestion(suggestionBody),
+    lineCount: linesToSuggest.length
+  }
 }
 
 // Fetch existing review comments
@@ -54637,12 +54650,24 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
         return []
       }
 
-      // With --unified=0, always create single line comments to avoid hunk boundary issues
-      const comment = {
-        path,
-        line: fromFileRange.start,
-        body: suggestionBody,
-      }
+      // Handle both string and object returns from generateSuggestionBody
+      const { body, lineCount } = typeof suggestionBody === 'string'
+        ? { body: suggestionBody, lineCount: 1 }
+        : suggestionBody
+
+      // Create appropriate comment based on line count
+      const comment = lineCount === 1
+        ? {
+            path,
+            line: fromFileRange.start,
+            body: body,
+          }
+        : {
+            path,
+            start_line: fromFileRange.start,
+            line: fromFileRange.start + lineCount - 1,
+            body: body,
+          }
 
       // Generate key for the new comment
       const commentKey = generateCommentKey(comment)
