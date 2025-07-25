@@ -43,21 +43,29 @@ const changedFiles = parsedDiff.files.filter(
 )
 
 const generateSuggestionBody = (changes) => {
-  const suggestionBody = changes
-    .filter(({ type }) => type === 'AddedLine')
-    .map(({ content }) => content)
-    .join('\n')
+  const addedLines = changes.filter(({ type }) => type === 'AddedLine')
+  const removedLines = changes.filter(({ type }) => type === 'RemovedLine')
+
+  if (addedLines.length === 0) {
+    return null // No added lines to suggest
+  }
+
+  // If we have both added and removed lines, only suggest lines that are actually different
+  const linesToSuggest = removedLines.length > 0
+    ? addedLines.filter(({ content }) => {
+        const removedContent = new Set(removedLines.map(({ content }) => content))
+        return !removedContent.has(content)
+      })
+    : addedLines // If only added lines (new content), include all of them
+
+  if (linesToSuggest.length === 0) {
+    return null // No actual content changes to suggest
+  }
+
+  const suggestionBody = linesToSuggest.map(({ content }) => content).join('\n')
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
   // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
   return `\`\`\`\`suggestion\n${suggestionBody}\n\`\`\`\``
-}
-
-function createSingleLineComment(path, fromFileRange, changes) {
-  return {
-    path,
-    line: fromFileRange.start,
-    body: generateSuggestionBody(changes),
-  }
 }
 
 // Fetch existing review comments
@@ -76,24 +84,38 @@ const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
-  chunks.flatMap(({ fromFileRange, changes }) => {
-    debug(`Starting line: ${fromFileRange.start}`)
-    debug(`Number of lines: ${fromFileRange.lines}`)
-    debug(`Changes: ${JSON.stringify(changes)}`)
+  chunks
+    .filter((chunk) => chunk.type === 'Chunk') // Only process regular chunks, not binary or combined chunks
+    .flatMap(({ fromFileRange, changes }) => {
+      debug(`Starting line: ${fromFileRange.start}`)
+      debug(`Number of lines: ${fromFileRange.lines}`)
+      debug(`Changes: ${JSON.stringify(changes)}`)
 
-    // With --unified=0, always create single line comments to avoid hunk boundary issues
-    const comment = createSingleLineComment(path, fromFileRange, changes)
+      // Generate the suggestion body for this chunk
+      const suggestionBody = generateSuggestionBody(changes)
 
-    // Generate key for the new comment
-    const commentKey = generateCommentKey(comment)
+      // Skip if no suggestion was generated (no actual changes to suggest)
+      if (!suggestionBody) {
+        return []
+      }
 
-    // Check if the new comment already exists
-    if (existingCommentKeys.has(commentKey)) {
-      return []
-    }
+      // With --unified=0, always create single line comments to avoid hunk boundary issues
+      const comment = {
+        path,
+        line: fromFileRange.start,
+        body: suggestionBody,
+      }
 
-    return [comment]
-  })
+      // Generate key for the new comment
+      const commentKey = generateCommentKey(comment)
+
+      // Check if the new comment already exists
+      if (existingCommentKeys.has(commentKey)) {
+        return []
+      }
+
+      return [comment]
+    })
 )
 
 // Create a review with the suggested changes if there are any
