@@ -54140,7 +54140,7 @@ const pullRequestFiles = (
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
 const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
   'git',
-  ['diff', '--unified=1', '--', ...pullRequestFiles],
+  ['diff', '--unified=0', '--', ...pullRequestFiles],
   { silent: true }
 )
 
