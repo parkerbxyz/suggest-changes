@@ -54566,7 +54566,7 @@ const pullRequestFiles = (
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
 const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
   'git',
-  ['diff', '--unified=0', '--', ...pullRequestFiles],
+  ['diff', '--unified=0', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
   { silent: true }
 )
 
@@ -54588,12 +54588,15 @@ const createSuggestion = (content) => {
 
 const generateSuggestionBody = (changes) => {
   const addedLines = changes.filter(({ type }) => type === 'AddedLine')
-  const removedLines = changes.filter(({ type }) => type === 'RemovedLine')
+  const removedLines = changes.filter(({ type }) => type === 'DeletedLine')
 
   // Handle pure deletions (only removed lines)
   if (addedLines.length === 0 && removedLines.length > 0) {
     // For deletions, suggest empty content (which will delete the lines)
-    return createSuggestion('')
+    return {
+      body: createSuggestion(''),
+      lineCount: removedLines.length
+    }
   }
 
   if (addedLines.length === 0) {
@@ -54636,7 +54639,7 @@ const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks
-    .filter((chunk) => chunk.type === 'Chunk') // Only process regular chunks, not binary or combined chunks
+    .filter((chunk) => chunk.type === 'Chunk') // Only process regular chunks
     .flatMap(({ fromFileRange, changes }) => {
       ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${fromFileRange.start}`)
       ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${fromFileRange.lines}`)
@@ -54650,10 +54653,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
         return []
       }
 
-      // Handle both string and object returns from generateSuggestionBody
-      const { body, lineCount } = typeof suggestionBody === 'string'
-        ? { body: suggestionBody, lineCount: 1 }
-        : suggestionBody
+      const { body, lineCount } = suggestionBody
 
       // Create appropriate comment based on line count
       const comment = lineCount === 1
