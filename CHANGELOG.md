@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.2](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.1...v2.0.2) (2025-07-25)
+
+
+### Bug Fixes
+
+* **deps:** bump @octokit/action from 8.0.1 to 8.0.2 ([#71](https://github.com/parkerbxyz/suggest-changes/issues/71)) ([705eeae](https://github.com/parkerbxyz/suggest-changes/commit/705eeae2f0f3ca8fe6b0e67c20648457266f1b30))
+* update suggestion line range calculation ([#72](https://github.com/parkerbxyz/suggest-changes/issues/72)) ([4492e05](https://github.com/parkerbxyz/suggest-changes/commit/4492e05c5f41709a0998515edda56c02758f9237))
+
 ## [2.0.1](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.0...v2.0.1) (2025-05-21)
 
 
