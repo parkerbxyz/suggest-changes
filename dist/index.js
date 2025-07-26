@@ -54546,13 +54546,25 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 
 
 
+/** @typedef {import('parse-git-diff').AnyLineChange} AnyLineChange */
+/** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
+/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
+/** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
+/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
+
+/**
+ * @typedef {Object} SuggestionBody
+ * @property {string} body
+ * @property {number} lineCount
+ */
+
 const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_5__/* .Octokit */ .Eg({
   userAgent: 'suggest-changes',
 })
 
 const [owner, repo] = String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_REPOSITORY).split('/')
 
-/** @type {import("@octokit/webhooks-types").PullRequestEvent} */
+/** @type {PullRequestEvent} */
 const eventPayload = JSON.parse(
   (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_EVENT_PATH), 'utf8')
 )
@@ -54566,7 +54578,7 @@ const pullRequestFiles = (
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
 const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
   'git',
-  ['diff', '--unified=1', '--', ...pullRequestFiles],
+  ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
   { silent: true }
 )
 
@@ -54580,34 +54592,60 @@ const changedFiles = parsedDiff.files.filter(
   (file) => file.type === 'ChangedFile'
 )
 
-const generateSuggestionBody = (changes) => {
-  const suggestionBody = changes
-    .filter(({ type }) => type === 'AddedLine' || type === 'UnchangedLine')
-    .map(({ content }) => content)
-    .join('\n')
+/**
+ * @param {string} content
+ * @returns {string}
+ */
+const createSuggestion = (content) => {
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
   // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
-  return `\`\`\`\`suggestion\n${suggestionBody}\n\`\`\`\``
+  return `\`\`\`\`suggestion\n${content}\n\`\`\`\``
 }
 
-function createSingleLineComment(path, fromFileRange, changes) {
-  return {
-    path,
-    line: fromFileRange.start,
-    body: generateSuggestionBody(changes),
+/**
+ * @param {AnyLineChange[]} changes
+ * @returns {SuggestionBody | null}
+ */
+const generateSuggestionBody = (changes) => {
+  const addedLines = changes.filter(({ type }) => type === 'AddedLine')
+  const removedLines = changes.filter(({ type }) => type === 'DeletedLine')
+  const unchangedLines = changes.filter(({ type }) => type === 'UnchangedLine')
+
+  // Handle pure deletions (only removed lines)
+  if (addedLines.length === 0 && removedLines.length > 0) {
+    // For deletions, suggest empty content (which will delete the lines)
+    return {
+      body: createSuggestion(''),
+      lineCount: removedLines.length
+    }
   }
-}
 
-function createMultiLineComment(path, fromFileRange, changes) {
+  if (addedLines.length === 0) {
+    return null // No changes to suggest
+  }
+
+  // If we have both added and removed lines, only suggest lines that are actually different
+  const linesToSuggest = removedLines.length > 0
+    ? addedLines.filter(({ content }) => {
+        const removedContent = new Set(removedLines.map(({ content }) => content))
+        return !removedContent.has(content)
+      })
+    : addedLines // If only added lines (new content), include all of them
+
+  if (linesToSuggest.length === 0) {
+    return null // No actual content changes to suggest
+  }
+
+  // Build suggestion including unchanged context and new/changed lines
+  const allSuggestionLines = [
+    ...unchangedLines.map(({ content }) => content),
+    ...linesToSuggest.map(({ content }) => content)
+  ]
+
+  const suggestionBody = allSuggestionLines.join('\n')
   return {
-    path,
-    start_line: fromFileRange.start,
-    // The last line of the chunk is the start line plus the number of lines in the chunk
-    // minus 1 to account for the start line being included in fromFileRange.lines
-    line: fromFileRange.start + fromFileRange.lines - 1,
-    start_side: 'RIGHT',
-    side: 'RIGHT',
-    body: generateSuggestionBody(changes),
+    body: createSuggestion(suggestionBody),
+    lineCount: unchangedLines.length + linesToSuggest.length
   }
 }
 
@@ -54617,6 +54655,10 @@ const existingComments = (
 ).data
 
 // Function to generate a unique key for a comment
+/**
+ * @param {PostReviewComment | GetReviewComment} comment
+ * @returns {string}
+ */
 const generateCommentKey = (comment) =>
   `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
     comment.body
@@ -54627,36 +54669,59 @@ const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 
 // Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
-  chunks.flatMap(({ fromFileRange, changes }) => {
-    ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${fromFileRange.start}`)
-    ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${fromFileRange.lines}`)
-    ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
+  chunks
+    .filter((chunk) => chunk.type === 'Chunk') // Only process regular chunks
+    .flatMap(({ fromFileRange, changes }) => {
+      ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${fromFileRange.start}`)
+      ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${fromFileRange.lines}`)
+      ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
 
-    const comment =
-      fromFileRange.lines <= 1
-        ? createSingleLineComment(path, fromFileRange, changes)
-        : createMultiLineComment(path, fromFileRange, changes)
+      // Generate the suggestion body for this chunk
+      const suggestionBody = generateSuggestionBody(changes)
 
-    // Generate key for the new comment
-    const commentKey = generateCommentKey(comment)
+      // Skip if no suggestion was generated (no actual changes to suggest)
+      if (!suggestionBody) {
+        return []
+      }
 
-    // Check if the new comment already exists
-    if (existingCommentKeys.has(commentKey)) {
-      return []
-    }
+      const { body, lineCount } = suggestionBody
 
-    return [comment]
-  })
+      // Create appropriate comment based on line count
+      const comment = lineCount === 1
+        ? {
+            path,
+            line: fromFileRange.start,
+            body: body,
+          }
+        : {
+            path,
+            start_line: fromFileRange.start,
+            line: fromFileRange.start + lineCount - 1,
+            body: body,
+          }
+
+      // Generate key for the new comment
+      const commentKey = generateCommentKey(comment)
+
+      // Check if the new comment already exists
+      if (existingCommentKeys.has(commentKey)) {
+        return []
+      }
+
+      return [comment]
+    })
 )
 
 // Create a review with the suggested changes if there are any
 if (comments.length > 0) {
+  const event = /** @type {ReviewEvent} */ ((0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('event').toUpperCase())
+  const body = (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment')
   await octokit.pulls.createReview({
     owner,
     repo,
     pull_number,
-    event: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('event').toUpperCase(),
-    body: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment'),
+    event,
+    body,
     comments,
   })
 }
