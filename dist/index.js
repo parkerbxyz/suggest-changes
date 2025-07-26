@@ -54546,13 +54546,25 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 
 
 
+/** @typedef {import('parse-git-diff').AnyLineChange} AnyLineChange */
+/** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
+/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
+/** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
+/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
+
+/**
+ * @typedef {Object} SuggestionBody
+ * @property {string} body
+ * @property {number} lineCount
+ */
+
 const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_5__/* .Octokit */ .Eg({
   userAgent: 'suggest-changes',
 })
 
 const [owner, repo] = String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_REPOSITORY).split('/')
 
-/** @type {import("@octokit/webhooks-types").PullRequestEvent} */
+/** @type {PullRequestEvent} */
 const eventPayload = JSON.parse(
   (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_EVENT_PATH), 'utf8')
 )
@@ -54580,12 +54592,20 @@ const changedFiles = parsedDiff.files.filter(
   (file) => file.type === 'ChangedFile'
 )
 
+/**
+ * @param {string} content
+ * @returns {string}
+ */
 const createSuggestion = (content) => {
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
   // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
   return `\`\`\`\`suggestion\n${content}\n\`\`\`\``
 }
 
+/**
+ * @param {AnyLineChange[]} changes
+ * @returns {SuggestionBody | null}
+ */
 const generateSuggestionBody = (changes) => {
   const addedLines = changes.filter(({ type }) => type === 'AddedLine')
   const removedLines = changes.filter(({ type }) => type === 'DeletedLine')
@@ -54628,6 +54648,10 @@ const existingComments = (
 ).data
 
 // Function to generate a unique key for a comment
+/**
+ * @param {PostReviewComment | GetReviewComment} comment
+ * @returns {string}
+ */
 const generateCommentKey = (comment) =>
   `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
     comment.body
@@ -54683,13 +54707,14 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
 
 // Create a review with the suggested changes if there are any
 if (comments.length > 0) {
-  const event = (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('event').toUpperCase()
+  const event = /** @type {ReviewEvent} */ ((0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('event').toUpperCase())
+  const body = (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment')
   await octokit.pulls.createReview({
     owner,
     repo,
     pull_number,
-    event: /** @type {'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'} */ (event),
-    body: (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment'),
+    event,
+    body,
     comments,
   })
 }

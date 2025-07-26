@@ -8,13 +8,25 @@ import { readFileSync } from 'node:fs'
 import { env } from 'node:process'
 import parseGitDiff from 'parse-git-diff'
 
+/** @typedef {import('parse-git-diff').AnyLineChange} AnyLineChange */
+/** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
+/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
+/** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
+/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
+
+/**
+ * @typedef {Object} SuggestionBody
+ * @property {string} body
+ * @property {number} lineCount
+ */
+
 const octokit = new Octokit({
   userAgent: 'suggest-changes',
 })
 
 const [owner, repo] = String(env.GITHUB_REPOSITORY).split('/')
 
-/** @type {import("@octokit/webhooks-types").PullRequestEvent} */
+/** @type {PullRequestEvent} */
 const eventPayload = JSON.parse(
   readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
 )
@@ -42,12 +54,20 @@ const changedFiles = parsedDiff.files.filter(
   (file) => file.type === 'ChangedFile'
 )
 
+/**
+ * @param {string} content
+ * @returns {string}
+ */
 const createSuggestion = (content) => {
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
   // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
   return `\`\`\`\`suggestion\n${content}\n\`\`\`\``
 }
 
+/**
+ * @param {AnyLineChange[]} changes
+ * @returns {SuggestionBody | null}
+ */
 const generateSuggestionBody = (changes) => {
   const addedLines = changes.filter(({ type }) => type === 'AddedLine')
   const removedLines = changes.filter(({ type }) => type === 'DeletedLine')
@@ -90,6 +110,10 @@ const existingComments = (
 ).data
 
 // Function to generate a unique key for a comment
+/**
+ * @param {PostReviewComment | GetReviewComment} comment
+ * @returns {string}
+ */
 const generateCommentKey = (comment) =>
   `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
     comment.body
@@ -145,13 +169,14 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
 
 // Create a review with the suggested changes if there are any
 if (comments.length > 0) {
-  const event = getInput('event').toUpperCase()
+  const event = /** @type {ReviewEvent} */ (getInput('event').toUpperCase())
+  const body = getInput('comment')
   await octokit.pulls.createReview({
     owner,
     repo,
     pull_number,
-    event: /** @type {'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'} */ (event),
-    body: getInput('comment'),
+    event,
+    body,
     comments,
   })
 }
