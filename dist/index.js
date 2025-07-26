@@ -54637,15 +54637,35 @@ const generateSuggestionBody = (changes) => {
   }
 
   // Build suggestion including unchanged context and new/changed lines
-  const allSuggestionLines = [
-    ...unchangedLines.map(({ content }) => content),
-    ...linesToSuggest.map(({ content }) => content)
-  ]
-
-  const suggestionBody = allSuggestionLines.join('\n')
-  return {
-    body: createSuggestion(suggestionBody),
-    lineCount: unchangedLines.length + linesToSuggest.length
+  // For pure additions, include appropriate context + new lines
+  if (removedLines.length === 0) {
+    // Pure addition: find the best context line
+    // Prefer lines that come before the addition, but use after if needed
+    const contextLine = unchangedLines.length > 0 ? unchangedLines[0] : null
+    
+    if (contextLine) {
+      // Include context + new content
+      const suggestionLines = [contextLine.content, ...linesToSuggest.map(({ content }) => content)]
+      const suggestionBody = suggestionLines.join('\n')
+      return {
+        body: createSuggestion(suggestionBody),
+        lineCount: 1 + linesToSuggest.length
+      }
+    } else {
+      // No context available, just show the addition
+      const suggestionBody = linesToSuggest.map(({ content }) => content).join('\n')
+      return {
+        body: createSuggestion(suggestionBody),
+        lineCount: linesToSuggest.length
+      }
+    }
+  } else {
+    // Replacement: only show the new/changed content (no unchanged context for replacements)
+    const suggestionBody = linesToSuggest.map(({ content }) => content).join('\n')
+    return {
+      body: createSuggestion(suggestionBody),
+      lineCount: linesToSuggest.length
+    }
   }
 }
 
