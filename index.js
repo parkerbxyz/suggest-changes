@@ -40,7 +40,7 @@ const pullRequestFiles = (
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
 const diff = await getExecOutput(
   'git',
-  ['diff', '--unified=0', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
+  ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
   { silent: true }
 )
 
