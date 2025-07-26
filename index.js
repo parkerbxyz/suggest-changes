@@ -71,6 +71,7 @@ const createSuggestion = (content) => {
 const generateSuggestionBody = (changes) => {
   const addedLines = changes.filter(({ type }) => type === 'AddedLine')
   const removedLines = changes.filter(({ type }) => type === 'DeletedLine')
+  const unchangedLines = changes.filter(({ type }) => type === 'UnchangedLine')
 
   // Handle pure deletions (only removed lines)
   if (addedLines.length === 0 && removedLines.length > 0) {
@@ -97,10 +98,16 @@ const generateSuggestionBody = (changes) => {
     return null // No actual content changes to suggest
   }
 
-  const suggestionBody = linesToSuggest.map(({ content }) => content).join('\n')
+  // Build suggestion including unchanged context and new/changed lines
+  const allSuggestionLines = [
+    ...unchangedLines.map(({ content }) => content),
+    ...linesToSuggest.map(({ content }) => content)
+  ]
+
+  const suggestionBody = allSuggestionLines.join('\n')
   return {
     body: createSuggestion(suggestionBody),
-    lineCount: linesToSuggest.length
+    lineCount: unchangedLines.length + linesToSuggest.length
   }
 }
 
