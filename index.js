@@ -108,7 +108,10 @@ const generateSuggestionBody = (changes) => {
     : linesToSuggest.map(({ content }) => content)
   
   const suggestionBody = suggestionLines.join('\n')
-  const lineCount = contextLine ? 1 + linesToSuggest.length : linesToSuggest.length
+  
+  // For pure additions with context, we want to position the comment on just the context line
+  // The suggestion will show the context + new content, but only affect the context line
+  const lineCount = contextLine ? 1 : linesToSuggest.length
   
   return {
     body: createSuggestion(suggestionBody),
