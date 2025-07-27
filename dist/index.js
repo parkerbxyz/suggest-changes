@@ -54747,9 +54747,33 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       let startLine, endLine
 
       if (deletedLines.length > 0) {
-        // If we have deletions, use the last deleted line's position in the PR head
-        // This ensures suggestions appear on the most relevant line being changed
-        startLine = deletedLines[deletedLines.length - 1].lineBefore
+        // If we have deletions, use the first deleted line's position by default
+        let targetDeletedLine = deletedLines[0]
+        
+        // Special case: if we have both deletions AND additions (mixed changes)
+        // and multiple deleted lines where some are empty and others have content,
+        // prefer the non-empty line that matches our suggestion content
+        if (deletedLines.length > 1 && addedLines.length > 0) {
+          const linesToSuggest = addedLines.filter(({ content }) => {
+            const deletedContent = new Set(
+              deletedLines.map(({ content }) => content)
+            )
+            return !deletedContent.has(content)
+          })
+          
+          if (linesToSuggest.length > 0) {
+            const suggestedContent = linesToSuggest[0].content
+            const nonEmptyDeleted = deletedLines.filter(deleted => deleted.content.trim().length > 0)
+            const matchingDeleted = nonEmptyDeleted.find(deleted => 
+              deleted.content.trim() === suggestedContent.trim()
+            )
+            if (matchingDeleted) {
+              targetDeletedLine = matchingDeleted
+            }
+          }
+        }
+        
+        startLine = targetDeletedLine.lineBefore
         endLine = startLine + lineCount - 1
       } else if (unchangedLines.length > 0) {
         // Pure additions with context - position on the unchanged line in PR head
