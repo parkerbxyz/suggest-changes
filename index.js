@@ -54,40 +54,6 @@ function isUnchangedLine(change) {
   )
 }
 
-const octokit = new Octokit({
-  userAgent: 'suggest-changes',
-})
-
-const [owner, repo] = String(env.GITHUB_REPOSITORY).split('/')
-
-/** @type {PullRequestEvent} */
-const eventPayload = JSON.parse(
-  readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
-)
-
-const pull_number = Number(eventPayload.pull_request.number)
-
-const pullRequestFiles = (
-  await octokit.pulls.listFiles({ owner, repo, pull_number })
-).data.map((file) => file.filename)
-
-// Get the diff between the head branch and the base branch (limit to the files in the pull request)
-const diff = await getExecOutput(
-  'git',
-  ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
-  { silent: true }
-)
-
-debug(`Diff output: ${diff.stdout}`)
-
-// Create an array of changes from the diff output based on patches
-const parsedDiff = parseGitDiff(diff.stdout)
-
-// Get changed files from parsedDiff (changed files have type 'ChangedFile')
-const changedFiles = parsedDiff.files.filter(
-  (file) => file.type === 'ChangedFile'
-)
-
 /**
  * @param {string} content
  * @returns {string}
@@ -205,13 +171,8 @@ const generateSuggestionBody = (changes) => {
   }
 }
 
-// Fetch existing review comments
-const existingComments = (
-  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
-).data
-
-// Function to generate a unique key for a comment
 /**
+ * Function to generate a unique key for a comment
  * @param {PostReviewComment | GetReviewComment} comment
  * @returns {string}
  */
@@ -219,6 +180,46 @@ const generateCommentKey = (comment) =>
   `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
     comment.body
   }`
+
+const octokit = new Octokit({
+  userAgent: 'suggest-changes',
+})
+
+const [owner, repo] = String(env.GITHUB_REPOSITORY).split('/')
+
+/** @type {PullRequestEvent} */
+const eventPayload = JSON.parse(
+  readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
+)
+
+const pull_number = Number(eventPayload.pull_request.number)
+
+const pullRequestFiles = (
+  await octokit.pulls.listFiles({ owner, repo, pull_number })
+).data.map((file) => file.filename)
+
+// Get the diff between the head branch and the base branch (limit to the files in the pull request)
+const diff = await getExecOutput(
+  'git',
+  // Ignore CR at EOL to avoid no-op suggestions
+  ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
+  { silent: true }
+)
+
+debug(`Diff output: ${diff.stdout}`)
+
+// Create an array of changes from the diff output based on patches
+const parsedDiff = parseGitDiff(diff.stdout)
+
+// Get changed files from parsedDiff (changed files have type 'ChangedFile')
+const changedFiles = parsedDiff.files.filter(
+  (file) => file.type === 'ChangedFile'
+)
+
+// Fetch existing review comments
+const existingComments = (
+  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
+).data
 
 // Create a Set of existing comment keys for faster lookup
 const existingCommentKeys = new Set(existingComments.map(generateCommentKey))

@@ -54598,40 +54598,6 @@ function isUnchangedLine(change) {
   )
 }
 
-const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_5__/* .Octokit */ .Eg({
-  userAgent: 'suggest-changes',
-})
-
-const [owner, repo] = String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_REPOSITORY).split('/')
-
-/** @type {PullRequestEvent} */
-const eventPayload = JSON.parse(
-  (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_EVENT_PATH), 'utf8')
-)
-
-const pull_number = Number(eventPayload.pull_request.number)
-
-const pullRequestFiles = (
-  await octokit.pulls.listFiles({ owner, repo, pull_number })
-).data.map((file) => file.filename)
-
-// Get the diff between the head branch and the base branch (limit to the files in the pull request)
-const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
-  'git',
-  ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
-  { silent: true }
-)
-
-;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Diff output: ${diff.stdout}`)
-
-// Create an array of changes from the diff output based on patches
-const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_4__/* ["default"] */ .A)(diff.stdout)
-
-// Get changed files from parsedDiff (changed files have type 'ChangedFile')
-const changedFiles = parsedDiff.files.filter(
-  (file) => file.type === 'ChangedFile'
-)
-
 /**
  * @param {string} content
  * @returns {string}
@@ -54749,13 +54715,8 @@ const generateSuggestionBody = (changes) => {
   }
 }
 
-// Fetch existing review comments
-const existingComments = (
-  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
-).data
-
-// Function to generate a unique key for a comment
 /**
+ * Function to generate a unique key for a comment
  * @param {PostReviewComment | GetReviewComment} comment
  * @returns {string}
  */
@@ -54763,6 +54724,46 @@ const generateCommentKey = (comment) =>
   `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
     comment.body
   }`
+
+const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_5__/* .Octokit */ .Eg({
+  userAgent: 'suggest-changes',
+})
+
+const [owner, repo] = String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_REPOSITORY).split('/')
+
+/** @type {PullRequestEvent} */
+const eventPayload = JSON.parse(
+  (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_EVENT_PATH), 'utf8')
+)
+
+const pull_number = Number(eventPayload.pull_request.number)
+
+const pullRequestFiles = (
+  await octokit.pulls.listFiles({ owner, repo, pull_number })
+).data.map((file) => file.filename)
+
+// Get the diff between the head branch and the base branch (limit to the files in the pull request)
+const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
+  'git',
+  // Ignore CR at EOL to avoid no-op suggestions
+  ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
+  { silent: true }
+)
+
+;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Diff output: ${diff.stdout}`)
+
+// Create an array of changes from the diff output based on patches
+const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_4__/* ["default"] */ .A)(diff.stdout)
+
+// Get changed files from parsedDiff (changed files have type 'ChangedFile')
+const changedFiles = parsedDiff.files.filter(
+  (file) => file.type === 'ChangedFile'
+)
+
+// Fetch existing review comments
+const existingComments = (
+  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
+).data
 
 // Create a Set of existing comment keys for faster lookup
 const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
