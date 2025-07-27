@@ -54153,6 +54153,13 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:events"
 
 /***/ }),
 
+/***/ 3024:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
+
+/***/ }),
+
 /***/ 7067:
 /***/ ((module) => {
 
@@ -54178,6 +54185,13 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:net");
 /***/ ((module) => {
 
 module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:perf_hooks");
+
+/***/ }),
+
+/***/ 1708:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:process");
 
 /***/ }),
 
@@ -54510,77 +54524,232 @@ module.exports.xL = safeParse
 __webpack_unused_export__ = defaultContentType
 
 
-/***/ })
+/***/ }),
 
-/******/ });
-/************************************************************************/
-/******/ // The module cache
-/******/ var __webpack_module_cache__ = {};
-/******/ 
-/******/ // The require function
-/******/ function __nccwpck_require__(moduleId) {
-/******/ 	// Check if module is in cache
-/******/ 	var cachedModule = __webpack_module_cache__[moduleId];
-/******/ 	if (cachedModule !== undefined) {
-/******/ 		return cachedModule.exports;
-/******/ 	}
-/******/ 	// Create a new module (and put it into the cache)
-/******/ 	var module = __webpack_module_cache__[moduleId] = {
-/******/ 		// no module.id needed
-/******/ 		// no module.loaded needed
-/******/ 		exports: {}
-/******/ 	};
-/******/ 
-/******/ 	// Execute the module function
-/******/ 	var threw = true;
-/******/ 	try {
-/******/ 		__webpack_modules__[moduleId].call(module.exports, module, module.exports, __nccwpck_require__);
-/******/ 		threw = false;
-/******/ 	} finally {
-/******/ 		if(threw) delete __webpack_module_cache__[moduleId];
-/******/ 	}
-/******/ 
-/******/ 	// Return the exports of the module
-/******/ 	return module.exports;
-/******/ }
-/******/ 
-/************************************************************************/
-/******/ /* webpack/runtime/define property getters */
-/******/ (() => {
-/******/ 	// define getter functions for harmony exports
-/******/ 	__nccwpck_require__.d = (exports, definition) => {
-/******/ 		for(var key in definition) {
-/******/ 			if(__nccwpck_require__.o(definition, key) && !__nccwpck_require__.o(exports, key)) {
-/******/ 				Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
-/******/ 			}
-/******/ 		}
-/******/ 	};
-/******/ })();
-/******/ 
-/******/ /* webpack/runtime/hasOwnProperty shorthand */
-/******/ (() => {
-/******/ 	__nccwpck_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
-/******/ })();
-/******/ 
-/******/ /* webpack/runtime/compat */
-/******/ 
-/******/ if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = new URL('.', import.meta.url).pathname.slice(import.meta.url.match(/^file:\/\/\/\w:/) ? 1 : 0, -1) + "/";
-/******/ 
-/************************************************************************/
-var __webpack_exports__ = {};
+/***/ 5483:
+/***/ ((__webpack_module__, __unused_webpack___webpack_exports__, __nccwpck_require__) => {
+
+__nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependencies__, __webpack_async_result__) => { try {
+/* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(7484);
+/* harmony import */ var _actions_exec__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(5236);
+/* harmony import */ var _octokit_action__WEBPACK_IMPORTED_MODULE_5__ = __nccwpck_require__(5545);
+/* harmony import */ var node_fs__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(3024);
+/* harmony import */ var node_process__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(1708);
+/* harmony import */ var parse_git_diff__WEBPACK_IMPORTED_MODULE_4__ = __nccwpck_require__(9372);
+// @ts-check
+
+
+
+
+
+
+
+
+
+/** @typedef {import('parse-git-diff').AnyLineChange} AnyLineChange */
+/** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
+/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
+/** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
+/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
+
+/**
+ * @typedef {Object} SuggestionBody
+ * @property {string} body
+ * @property {number} lineCount
+ */
+
+const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_5__/* .Octokit */ .Eg({
+  userAgent: 'suggest-changes',
+})
+
+const [owner, repo] = String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_REPOSITORY).split('/')
+
+/** @type {PullRequestEvent} */
+const eventPayload = JSON.parse(
+  (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_EVENT_PATH), 'utf8')
+)
+
+const pull_number = Number(eventPayload.pull_request.number)
+
+const pullRequestFiles = (
+  await octokit.pulls.listFiles({ owner, repo, pull_number })
+).data.map((file) => file.filename)
+
+// Get the diff between the head branch and the base branch (limit to the files in the pull request)
+const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
+  'git',
+  ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
+  { silent: true }
+)
+
+;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Diff output: ${diff.stdout}`)
+
+// Create an array of changes from the diff output based on patches
+const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_4__/* ["default"] */ .A)(diff.stdout)
+
+// Get changed files from parsedDiff (changed files have type 'ChangedFile')
+const changedFiles = parsedDiff.files.filter(
+  (file) => file.type === 'ChangedFile'
+)
+
+/**
+ * @param {string} content
+ * @returns {string}
+ */
+const createSuggestion = (content) => {
+  // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
+  // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
+  return `\`\`\`\`suggestion\n${content}\n\`\`\`\``
+}
+
+/**
+ * @param {AnyLineChange[]} changes
+ * @returns {SuggestionBody | null}
+ */
+const generateSuggestionBody = (changes) => {
+  const addedLines = changes.filter(({ type }) => type === 'AddedLine')
+  const removedLines = changes.filter(({ type }) => type === 'DeletedLine')
+  const unchangedLines = changes.filter(({ type }) => type === 'UnchangedLine')
+
+  // Handle pure deletions (only removed lines)
+  if (addedLines.length === 0 && removedLines.length > 0) {
+    // For deletions, suggest empty content (which will delete the lines)
+    return {
+      body: createSuggestion(''),
+      lineCount: removedLines.length
+    }
+  }
+
+  if (addedLines.length === 0) {
+    return null // No changes to suggest
+  }
+
+  // If we have both added and removed lines, only suggest lines that are actually different
+  const linesToSuggest = removedLines.length > 0
+    ? addedLines.filter(({ content }) => {
+        const removedContent = new Set(removedLines.map(({ content }) => content))
+        return !removedContent.has(content)
+      })
+    : addedLines // If only added lines (new content), include all of them
+
+  if (linesToSuggest.length === 0) {
+    return null // No actual content changes to suggest
+  }
+
+  // For pure additions (no removals), include context to make the suggestion clearer
+  const isPureAddition = removedLines.length === 0
+  const contextLine = isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
+  
+  // Build the suggestion content
+  const suggestionLines = contextLine 
+    ? [contextLine.content, ...linesToSuggest.map(({ content }) => content)]
+    : linesToSuggest.map(({ content }) => content)
+  
+  const suggestionBody = suggestionLines.join('\n')
+  
+  // For pure additions with context, we want to position the comment on just the context line
+  // The suggestion will show the context + new content, but only affect the context line
+  const lineCount = contextLine ? 1 : linesToSuggest.length
+  
+  return {
+    body: createSuggestion(suggestionBody),
+    lineCount
+  }
+}
+
+// Fetch existing review comments
+const existingComments = (
+  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
+).data
+
+// Function to generate a unique key for a comment
+/**
+ * @param {PostReviewComment | GetReviewComment} comment
+ * @returns {string}
+ */
+const generateCommentKey = (comment) =>
+  `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
+    comment.body
+  }`
+
+// Create a Set of existing comment keys for faster lookup
+const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
+
+// Create an array of comments with suggested changes for each chunk of each changed file
+const comments = changedFiles.flatMap(({ path, chunks }) =>
+  chunks
+    .filter((chunk) => chunk.type === 'Chunk') // Only process regular chunks
+    .flatMap(({ fromFileRange, changes }) => {
+      ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${fromFileRange.start}`)
+      ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${fromFileRange.lines}`)
+      ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
+
+      // Generate the suggestion body for this chunk
+      const suggestionBody = generateSuggestionBody(changes)
+
+      // Skip if no suggestion was generated (no actual changes to suggest)
+      if (!suggestionBody) {
+        return []
+      }
+
+      const { body, lineCount } = suggestionBody
+
+      // Create appropriate comment based on line count
+      const comment = lineCount === 1
+        ? {
+            path,
+            line: fromFileRange.start,
+            body: body,
+          }
+        : {
+            path,
+            start_line: fromFileRange.start,
+            line: fromFileRange.start + lineCount - 1,
+            body: body,
+          }
+
+      // Generate key for the new comment
+      const commentKey = generateCommentKey(comment)
+
+      // Check if the new comment already exists
+      if (existingCommentKeys.has(commentKey)) {
+        return []
+      }
+
+      return [comment]
+    })
+)
+
+// Create a review with the suggested changes if there are any
+if (comments.length > 0) {
+  const event = /** @type {ReviewEvent} */ ((0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('event').toUpperCase())
+  const body = (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment')
+  await octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number,
+    event,
+    body,
+    comments,
+  })
+}
+
+__webpack_async_result__();
+} catch(e) { __webpack_async_result__(e); } }, 1);
+
+/***/ }),
+
+/***/ 5545:
+/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __nccwpck_require__) => {
+
 
 // EXPORTS
 __nccwpck_require__.d(__webpack_exports__, {
-  H9: () => (/* binding */ createSuggestion),
-  E_: () => (/* binding */ generateCommentKey),
-  MW: () => (/* binding */ generateSuggestionBody),
-  eF: () => (/* binding */ run)
+  Eg: () => (/* binding */ dist_bundle_Octokit)
 });
 
-// EXTERNAL MODULE: ./node_modules/@actions/core/lib/core.js
-var core = __nccwpck_require__(7484);
-// EXTERNAL MODULE: ./node_modules/@actions/exec/lib/exec.js
-var exec = __nccwpck_require__(5236);
+// UNUSED EXPORTS: customFetch, getProxyAgent
+
 ;// CONCATENATED MODULE: ./node_modules/universal-user-agent/index.js
 function getUserAgent() {
   if (typeof navigator === "object" && "userAgent" in navigator) {
@@ -58370,10 +58539,18 @@ function getApiBaseUrl() {
 }
 
 
-;// CONCATENATED MODULE: external "node:fs"
-const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
-;// CONCATENATED MODULE: external "node:process"
-const external_node_process_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:process");
+
+/***/ }),
+
+/***/ 9372:
+/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __nccwpck_require__) => {
+
+
+// EXPORTS
+__nccwpck_require__.d(__webpack_exports__, {
+  A: () => (/* binding */ mjs)
+});
+
 ;// CONCATENATED MODULE: ./node_modules/parse-git-diff/build/mjs/context.js
 class Context {
     line = 1;
@@ -58754,219 +58931,137 @@ function getFilePath(ctx, input, type) {
 
 /* harmony default export */ const mjs = (parseGitDiff);
 //# sourceMappingURL=index.js.map
-;// CONCATENATED MODULE: ./index.js
-// @ts-check
 
+/***/ })
 
-
-
-
-
-
-
-
-/** @typedef {import('parse-git-diff').AnyLineChange} AnyLineChange */
-/** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
-/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
-/** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
-/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
-
-/**
- * @typedef {Object} SuggestionBody
- * @property {string} body
- * @property {number} lineCount
- */
-
-/**
- * @param {string} content
- * @returns {string}
- */
-const createSuggestion = (content) => {
-  // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
-  // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
-  return `\`\`\`\`suggestion\n${content}\n\`\`\`\``
-}
-
-/**
- * @param {AnyLineChange[]} changes
- * @returns {SuggestionBody | null}
- */
-const generateSuggestionBody = (changes) => {
-  const addedLines = changes.filter(({ type }) => type === 'AddedLine')
-  const removedLines = changes.filter(({ type }) => type === 'DeletedLine')
-  const unchangedLines = changes.filter(({ type }) => type === 'UnchangedLine')
-
-  // Handle pure deletions (only removed lines)
-  if (addedLines.length === 0 && removedLines.length > 0) {
-    // For deletions, suggest empty content (which will delete the lines)
-    return {
-      body: createSuggestion(''),
-      lineCount: removedLines.length
-    }
-  }
-
-  if (addedLines.length === 0) {
-    return null // No changes to suggest
-  }
-
-  // If we have both added and removed lines, only suggest lines that are actually different
-  const linesToSuggest = removedLines.length > 0
-    ? addedLines.filter(({ content }) => {
-        const removedContent = new Set(removedLines.map(({ content }) => content))
-        return !removedContent.has(content)
-      })
-    : addedLines // If only added lines (new content), include all of them
-
-  if (linesToSuggest.length === 0) {
-    return null // No actual content changes to suggest
-  }
-
-  // For pure additions (no removals), include context to make the suggestion clearer
-  const isPureAddition = removedLines.length === 0
-  const contextLine = isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
-
-  // Build the suggestion content
-  const suggestionLines = contextLine
-    ? [contextLine.content, ...linesToSuggest.map(({ content }) => content)]
-    : linesToSuggest.map(({ content }) => content)
-
-  const suggestionBody = suggestionLines.join('\n')
-
-  // For pure additions with context, we want to position the comment on just the context line
-  // The suggestion will show the context + new content, but only affect the context line
-  const lineCount = contextLine ? 1 : linesToSuggest.length
-
-  return {
-    body: createSuggestion(suggestionBody),
-    lineCount
-  }
-}
-
-/**
- * @param {PostReviewComment | GetReviewComment} comment
- * @returns {string}
- */
-const generateCommentKey = (comment) =>
-  `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
-    comment.body
-  }`
-
-async function run() {
-  const octokit = new dist_bundle_Octokit({
-    userAgent: 'suggest-changes',
-  })
-
-  const [owner, repo] = String(external_node_process_namespaceObject.env.GITHUB_REPOSITORY).split('/')
-
-  /** @type {PullRequestEvent} */
-  const eventPayload = JSON.parse(
-    (0,external_node_fs_namespaceObject.readFileSync)(String(external_node_process_namespaceObject.env.GITHUB_EVENT_PATH), 'utf8')
-  )
-
-  const pull_number = Number(eventPayload.pull_request.number)
-
-  const pullRequestFiles = (
-    await octokit.pulls.listFiles({ owner, repo, pull_number })
-  ).data.map((file) => file.filename)
-
-  // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-  const diff = await (0,exec.getExecOutput)(
-    'git',
-    ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
-    { silent: true }
-  )
-
-  ;(0,core.debug)(`Diff output: ${diff.stdout}`)
-
-  // Create an array of changes from the diff output based on patches
-  const parsedDiff = mjs(diff.stdout)
-
-  // Get changed files from parsedDiff (changed files have type 'ChangedFile')
-  const changedFiles = parsedDiff.files.filter(
-    (file) => file.type === 'ChangedFile'
-  )
-
-  // Fetch existing review comments
-  const existingComments = (
-    await octokit.pulls.listReviewComments({ owner, repo, pull_number })
-  ).data
-
-  // Create a Set of existing comment keys for faster lookup
-  const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
-
-  // Create an array of comments with suggested changes for each chunk of each changed file
-  const comments = changedFiles.flatMap(({ path, chunks }) =>
-    chunks
-      .filter((chunk) => chunk.type === 'Chunk') // Only process regular chunks
-      .flatMap(({ fromFileRange, toFileRange, changes }) => {
-        ;(0,core.debug)(`Starting line: ${fromFileRange.start}`)
-        ;(0,core.debug)(`Number of lines: ${fromFileRange.lines}`)
-        ;(0,core.debug)(`Changes: ${JSON.stringify(changes)}`)
-
-        // Generate the suggestion body for this chunk
-        const suggestionBody = generateSuggestionBody(changes)
-
-        // Skip if no suggestion was generated (no actual changes to suggest)
-        if (!suggestionBody) {
-          return []
-        }
-
-        const { body, lineCount } = suggestionBody
-
-        // Create appropriate comment based on line count
-        const comment = lineCount === 1
-          ? {
-              path,
-              line: toFileRange.start,
-              body: body,
-            }
-          : {
-              path,
-              start_line: toFileRange.start,
-              line: toFileRange.start + lineCount - 1,
-              body: body,
-            }
-
-        // Generate key for the new comment
-        const commentKey = generateCommentKey(comment)
-
-        // Check if the new comment already exists
-        if (existingCommentKeys.has(commentKey)) {
-          return []
-        }
-
-        return [comment]
-      })
-  )
-
-  // Create a review with the suggested changes if there are any
-  if (comments.length > 0) {
-    const event = /** @type {ReviewEvent} */ ((0,core.getInput)('event').toUpperCase())
-    const body = (0,core.getInput)('comment')
-    await octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number,
-      event,
-      body,
-      comments,
-    })
-  }
-}
-
-// Execute when run directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  run().catch(error => {
-    console.error(error)
-    process.exit(1)
-  })
-}
-
-// Export for testing
-
-
-var __webpack_exports__createSuggestion = __webpack_exports__.H9;
-var __webpack_exports__generateCommentKey = __webpack_exports__.E_;
-var __webpack_exports__generateSuggestionBody = __webpack_exports__.MW;
-var __webpack_exports__run = __webpack_exports__.eF;
-export { __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__run as run };
+/******/ });
+/************************************************************************/
+/******/ // The module cache
+/******/ var __webpack_module_cache__ = {};
+/******/ 
+/******/ // The require function
+/******/ function __nccwpck_require__(moduleId) {
+/******/ 	// Check if module is in cache
+/******/ 	var cachedModule = __webpack_module_cache__[moduleId];
+/******/ 	if (cachedModule !== undefined) {
+/******/ 		return cachedModule.exports;
+/******/ 	}
+/******/ 	// Create a new module (and put it into the cache)
+/******/ 	var module = __webpack_module_cache__[moduleId] = {
+/******/ 		// no module.id needed
+/******/ 		// no module.loaded needed
+/******/ 		exports: {}
+/******/ 	};
+/******/ 
+/******/ 	// Execute the module function
+/******/ 	var threw = true;
+/******/ 	try {
+/******/ 		__webpack_modules__[moduleId].call(module.exports, module, module.exports, __nccwpck_require__);
+/******/ 		threw = false;
+/******/ 	} finally {
+/******/ 		if(threw) delete __webpack_module_cache__[moduleId];
+/******/ 	}
+/******/ 
+/******/ 	// Return the exports of the module
+/******/ 	return module.exports;
+/******/ }
+/******/ 
+/************************************************************************/
+/******/ /* webpack/runtime/async module */
+/******/ (() => {
+/******/ 	var webpackQueues = typeof Symbol === "function" ? Symbol("webpack queues") : "__webpack_queues__";
+/******/ 	var webpackExports = typeof Symbol === "function" ? Symbol("webpack exports") : "__webpack_exports__";
+/******/ 	var webpackError = typeof Symbol === "function" ? Symbol("webpack error") : "__webpack_error__";
+/******/ 	var resolveQueue = (queue) => {
+/******/ 		if(queue && queue.d < 1) {
+/******/ 			queue.d = 1;
+/******/ 			queue.forEach((fn) => (fn.r--));
+/******/ 			queue.forEach((fn) => (fn.r-- ? fn.r++ : fn()));
+/******/ 		}
+/******/ 	}
+/******/ 	var wrapDeps = (deps) => (deps.map((dep) => {
+/******/ 		if(dep !== null && typeof dep === "object") {
+/******/ 			if(dep[webpackQueues]) return dep;
+/******/ 			if(dep.then) {
+/******/ 				var queue = [];
+/******/ 				queue.d = 0;
+/******/ 				dep.then((r) => {
+/******/ 					obj[webpackExports] = r;
+/******/ 					resolveQueue(queue);
+/******/ 				}, (e) => {
+/******/ 					obj[webpackError] = e;
+/******/ 					resolveQueue(queue);
+/******/ 				});
+/******/ 				var obj = {};
+/******/ 				obj[webpackQueues] = (fn) => (fn(queue));
+/******/ 				return obj;
+/******/ 			}
+/******/ 		}
+/******/ 		var ret = {};
+/******/ 		ret[webpackQueues] = x => {};
+/******/ 		ret[webpackExports] = dep;
+/******/ 		return ret;
+/******/ 	}));
+/******/ 	__nccwpck_require__.a = (module, body, hasAwait) => {
+/******/ 		var queue;
+/******/ 		hasAwait && ((queue = []).d = -1);
+/******/ 		var depQueues = new Set();
+/******/ 		var exports = module.exports;
+/******/ 		var currentDeps;
+/******/ 		var outerResolve;
+/******/ 		var reject;
+/******/ 		var promise = new Promise((resolve, rej) => {
+/******/ 			reject = rej;
+/******/ 			outerResolve = resolve;
+/******/ 		});
+/******/ 		promise[webpackExports] = exports;
+/******/ 		promise[webpackQueues] = (fn) => (queue && fn(queue), depQueues.forEach(fn), promise["catch"](x => {}));
+/******/ 		module.exports = promise;
+/******/ 		body((deps) => {
+/******/ 			currentDeps = wrapDeps(deps);
+/******/ 			var fn;
+/******/ 			var getResult = () => (currentDeps.map((d) => {
+/******/ 				if(d[webpackError]) throw d[webpackError];
+/******/ 				return d[webpackExports];
+/******/ 			}))
+/******/ 			var promise = new Promise((resolve) => {
+/******/ 				fn = () => (resolve(getResult));
+/******/ 				fn.r = 0;
+/******/ 				var fnQueue = (q) => (q !== queue && !depQueues.has(q) && (depQueues.add(q), q && !q.d && (fn.r++, q.push(fn))));
+/******/ 				currentDeps.map((dep) => (dep[webpackQueues](fnQueue)));
+/******/ 			});
+/******/ 			return fn.r ? promise : getResult();
+/******/ 		}, (err) => ((err ? reject(promise[webpackError] = err) : outerResolve(exports)), resolveQueue(queue)));
+/******/ 		queue && queue.d < 0 && (queue.d = 0);
+/******/ 	};
+/******/ })();
+/******/ 
+/******/ /* webpack/runtime/define property getters */
+/******/ (() => {
+/******/ 	// define getter functions for harmony exports
+/******/ 	__nccwpck_require__.d = (exports, definition) => {
+/******/ 		for(var key in definition) {
+/******/ 			if(__nccwpck_require__.o(definition, key) && !__nccwpck_require__.o(exports, key)) {
+/******/ 				Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
+/******/ 			}
+/******/ 		}
+/******/ 	};
+/******/ })();
+/******/ 
+/******/ /* webpack/runtime/hasOwnProperty shorthand */
+/******/ (() => {
+/******/ 	__nccwpck_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
+/******/ })();
+/******/ 
+/******/ /* webpack/runtime/compat */
+/******/ 
+/******/ if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = new URL('.', import.meta.url).pathname.slice(import.meta.url.match(/^file:\/\/\/\w:/) ? 1 : 0, -1) + "/";
+/******/ 
+/************************************************************************/
+/******/ 
+/******/ // startup
+/******/ // Load entry module and return exports
+/******/ // This entry module used 'module' so it can't be inlined
+/******/ var __webpack_exports__ = __nccwpck_require__(5483);
+/******/ __webpack_exports__ = await __webpack_exports__;
+/******/ 
