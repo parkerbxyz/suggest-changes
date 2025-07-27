@@ -178,6 +178,76 @@ const generateSuggestionBody = (changes) => {
 }
 
 /**
+ * Find a deleted line that matches the suggested content
+ * @param {DeletedLine[]} deletedLines - Array of deleted lines
+ * @param {string} suggestedContent - Content to match against
+ * @returns {DeletedLine | null} Matching deleted line or null
+ */
+const findMatchingDeletedLine = (deletedLines, suggestedContent) => {
+  return deletedLines.find(
+    (deleted) => deleted.content.trim() === suggestedContent.trim()
+  ) || null
+}
+
+/**
+ * Calculate line positioning for GitHub review comments.
+ * GitHub requires line numbers that exist in the PR head (the "before" state).
+ * We need to handle different scenarios: deletions, additions, and mixed changes.
+ * @param {AnyLineChange[]} groupChanges - The changes in this group
+ * @param {number} lineCount - Number of lines the suggestion spans
+ * @param {{start: number}} fromFileRange - File range information
+ * @returns {{startLine: number, endLine: number}} Line positioning
+ */
+const calculateLinePosition = (groupChanges, lineCount, fromFileRange) => {
+  const addedLines = groupChanges.filter(isAddedLine)
+  const deletedLines = groupChanges.filter(isDeletedLine)
+  const unchangedLines = groupChanges.filter(isUnchangedLine)
+
+  let startLine, endLine
+
+  if (deletedLines.length > 0) {
+    // SCENARIO 1: Changes with deletions
+    // Position the comment on a deleted line that exists in the PR head
+    let targetDeletedLine = deletedLines[0] // fallback to first
+
+    if (addedLines.length > 0) {
+      // For mixed changes (deletions + additions), try to find the most relevant deleted line
+      // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
+      const linesToSuggest = addedLines.filter(({ content }) => {
+        const deletedContent = new Set(
+          deletedLines.map(({ content }) => content)
+        )
+        return !deletedContent.has(content)
+      })
+
+      if (linesToSuggest.length > 0) {
+        // Try to find a deleted line that corresponds to our suggested content
+        const suggestedContent = linesToSuggest[0].content
+        const matchingDeleted = findMatchingDeletedLine(deletedLines, suggestedContent)
+        if (matchingDeleted) {
+          targetDeletedLine = matchingDeleted
+        }
+      }
+    }
+
+    startLine = targetDeletedLine.lineBefore
+    endLine = startLine + lineCount - 1
+  } else if (unchangedLines.length > 0) {
+    // SCENARIO 2: Pure additions with context
+    // Position on the unchanged line in PR head. The context is included in the suggestion body for clarity.
+    startLine = unchangedLines[0].lineBefore
+    endLine = startLine + lineCount - 1
+  } else {
+    // SCENARIO 3: Pure additions without context
+    // Use fromFileRange as fallback positioning
+    startLine = fromFileRange.start
+    endLine = startLine + lineCount - 1
+  }
+
+  return { startLine, endLine }
+}
+
+/**
  * Function to generate a unique key for a comment
  * @param {PostReviewComment | GetReviewComment} comment
  * @returns {string}
@@ -255,58 +325,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
         }
 
         const { body, lineCount } = suggestionBody
-
-        // Calculate the correct line position for GitHub review comments.
-        // GitHub requires line numbers that exist in the PR head (the "before" state).
-        // We need to handle different scenarios: deletions, additions, and mixed changes.
-        const addedLines = groupChanges.filter(isAddedLine)
-        const deletedLines = groupChanges.filter(isDeletedLine)
-        const unchangedLines = groupChanges.filter(isUnchangedLine)
-
-        let startLine, endLine
-
-        if (deletedLines.length > 0) {
-          // SCENARIO 1: Changes with deletions
-          // Position the comment on a deleted line that exists in the PR head
-          let targetDeletedLine = deletedLines[0] // fallback to first
-
-          if (addedLines.length > 0) {
-            // For mixed changes (deletions + additions), try to find the most relevant deleted line
-            // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
-            const linesToSuggest = addedLines.filter(({ content }) => {
-              const deletedContent = new Set(
-                deletedLines.map(({ content }) => content)
-              )
-              return !deletedContent.has(content)
-            })
-
-            if (linesToSuggest.length > 0) {
-              // Try to find a deleted line that corresponds to our suggested content
-              const suggestedContent = linesToSuggest[0].content
-              const matchingDeleted = deletedLines.find(
-                (deleted) =>
-                  // Look for a deleted line with similar content (ignoring leading/trailing whitespace)
-                  deleted.content.trim() === suggestedContent.trim()
-              )
-              if (matchingDeleted) {
-                targetDeletedLine = matchingDeleted
-              }
-            }
-          }
-
-          startLine = targetDeletedLine.lineBefore
-          endLine = startLine + lineCount - 1
-        } else if (unchangedLines.length > 0) {
-          // SCENARIO 2: Pure additions with context
-          // Position on the unchanged line in PR head. The context is included in the suggestion body for clarity.
-          startLine = unchangedLines[0].lineBefore
-          endLine = startLine + lineCount - 1
-        } else {
-          // SCENARIO 3: Pure additions without context
-          // Use fromFileRange as fallback positioning
-          startLine = fromFileRange.start
-          endLine = startLine + lineCount - 1
-        }
+        const { startLine, endLine } = calculateLinePosition(groupChanges, lineCount, fromFileRange)
 
         // Create appropriate comment based on line count
         const comment =
@@ -352,7 +371,9 @@ if (comments.length > 0) {
 
 // Export for testing
 export {
+  calculateLinePosition,
   createSuggestion,
+  findMatchingDeletedLine,
   generateCommentKey,
   generateSuggestionBody,
   groupContiguousChanges,

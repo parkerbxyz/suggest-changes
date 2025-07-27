@@ -54535,6 +54535,8 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 /* harmony export */   H9: () => (/* binding */ createSuggestion),
 /* harmony export */   Hw: () => (/* binding */ isAddedLine),
 /* harmony export */   MW: () => (/* binding */ generateSuggestionBody),
+/* harmony export */   Qc: () => (/* binding */ calculateLinePosition),
+/* harmony export */   Sg: () => (/* binding */ findMatchingDeletedLine),
 /* harmony export */   ZY: () => (/* binding */ groupContiguousChanges)
 /* harmony export */ });
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(7484);
@@ -54723,6 +54725,76 @@ const generateSuggestionBody = (changes) => {
 }
 
 /**
+ * Find a deleted line that matches the suggested content
+ * @param {DeletedLine[]} deletedLines - Array of deleted lines
+ * @param {string} suggestedContent - Content to match against
+ * @returns {DeletedLine | null} Matching deleted line or null
+ */
+const findMatchingDeletedLine = (deletedLines, suggestedContent) => {
+  return deletedLines.find(
+    (deleted) => deleted.content.trim() === suggestedContent.trim()
+  ) || null
+}
+
+/**
+ * Calculate line positioning for GitHub review comments.
+ * GitHub requires line numbers that exist in the PR head (the "before" state).
+ * We need to handle different scenarios: deletions, additions, and mixed changes.
+ * @param {AnyLineChange[]} groupChanges - The changes in this group
+ * @param {number} lineCount - Number of lines the suggestion spans
+ * @param {{start: number}} fromFileRange - File range information
+ * @returns {{startLine: number, endLine: number}} Line positioning
+ */
+const calculateLinePosition = (groupChanges, lineCount, fromFileRange) => {
+  const addedLines = groupChanges.filter(isAddedLine)
+  const deletedLines = groupChanges.filter(isDeletedLine)
+  const unchangedLines = groupChanges.filter(isUnchangedLine)
+
+  let startLine, endLine
+
+  if (deletedLines.length > 0) {
+    // SCENARIO 1: Changes with deletions
+    // Position the comment on a deleted line that exists in the PR head
+    let targetDeletedLine = deletedLines[0] // fallback to first
+
+    if (addedLines.length > 0) {
+      // For mixed changes (deletions + additions), try to find the most relevant deleted line
+      // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
+      const linesToSuggest = addedLines.filter(({ content }) => {
+        const deletedContent = new Set(
+          deletedLines.map(({ content }) => content)
+        )
+        return !deletedContent.has(content)
+      })
+
+      if (linesToSuggest.length > 0) {
+        // Try to find a deleted line that corresponds to our suggested content
+        const suggestedContent = linesToSuggest[0].content
+        const matchingDeleted = findMatchingDeletedLine(deletedLines, suggestedContent)
+        if (matchingDeleted) {
+          targetDeletedLine = matchingDeleted
+        }
+      }
+    }
+
+    startLine = targetDeletedLine.lineBefore
+    endLine = startLine + lineCount - 1
+  } else if (unchangedLines.length > 0) {
+    // SCENARIO 2: Pure additions with context
+    // Position on the unchanged line in PR head. The context is included in the suggestion body for clarity.
+    startLine = unchangedLines[0].lineBefore
+    endLine = startLine + lineCount - 1
+  } else {
+    // SCENARIO 3: Pure additions without context
+    // Use fromFileRange as fallback positioning
+    startLine = fromFileRange.start
+    endLine = startLine + lineCount - 1
+  }
+
+  return { startLine, endLine }
+}
+
+/**
  * Function to generate a unique key for a comment
  * @param {PostReviewComment | GetReviewComment} comment
  * @returns {string}
@@ -54800,58 +54872,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
         }
 
         const { body, lineCount } = suggestionBody
-
-        // Calculate the correct line position for GitHub review comments.
-        // GitHub requires line numbers that exist in the PR head (the "before" state).
-        // We need to handle different scenarios: deletions, additions, and mixed changes.
-        const addedLines = groupChanges.filter(isAddedLine)
-        const deletedLines = groupChanges.filter(isDeletedLine)
-        const unchangedLines = groupChanges.filter(isUnchangedLine)
-
-        let startLine, endLine
-
-        if (deletedLines.length > 0) {
-          // SCENARIO 1: Changes with deletions
-          // Position the comment on a deleted line that exists in the PR head
-          let targetDeletedLine = deletedLines[0] // fallback to first
-
-          if (addedLines.length > 0) {
-            // For mixed changes (deletions + additions), try to find the most relevant deleted line
-            // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
-            const linesToSuggest = addedLines.filter(({ content }) => {
-              const deletedContent = new Set(
-                deletedLines.map(({ content }) => content)
-              )
-              return !deletedContent.has(content)
-            })
-
-            if (linesToSuggest.length > 0) {
-              // Try to find a deleted line that corresponds to our suggested content
-              const suggestedContent = linesToSuggest[0].content
-              const matchingDeleted = deletedLines.find(
-                (deleted) =>
-                  // Look for a deleted line with similar content (ignoring leading/trailing whitespace)
-                  deleted.content.trim() === suggestedContent.trim()
-              )
-              if (matchingDeleted) {
-                targetDeletedLine = matchingDeleted
-              }
-            }
-          }
-
-          startLine = targetDeletedLine.lineBefore
-          endLine = startLine + lineCount - 1
-        } else if (unchangedLines.length > 0) {
-          // SCENARIO 2: Pure additions with context
-          // Position on the unchanged line in PR head. The context is included in the suggestion body for clarity.
-          startLine = unchangedLines[0].lineBefore
-          endLine = startLine + lineCount - 1
-        } else {
-          // SCENARIO 3: Pure additions without context
-          // Use fromFileRange as fallback positioning
-          startLine = fromFileRange.start
-          endLine = startLine + lineCount - 1
-        }
+        const { startLine, endLine } = calculateLinePosition(groupChanges, lineCount, fromFileRange)
 
         // Create appropriate comment based on line count
         const comment =
@@ -59228,10 +59249,12 @@ function getFilePath(ctx, input, type) {
 /******/ // This entry module used 'module' so it can't be inlined
 /******/ var __webpack_exports__ = __nccwpck_require__(5483);
 /******/ __webpack_exports__ = await __webpack_exports__;
+/******/ var __webpack_exports__calculateLinePosition = __webpack_exports__.Qc;
 /******/ var __webpack_exports__createSuggestion = __webpack_exports__.H9;
+/******/ var __webpack_exports__findMatchingDeletedLine = __webpack_exports__.Sg;
 /******/ var __webpack_exports__generateCommentKey = __webpack_exports__.E_;
 /******/ var __webpack_exports__generateSuggestionBody = __webpack_exports__.MW;
 /******/ var __webpack_exports__groupContiguousChanges = __webpack_exports__.ZY;
 /******/ var __webpack_exports__isAddedLine = __webpack_exports__.Hw;
-/******/ export { __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__groupContiguousChanges as groupContiguousChanges, __webpack_exports__isAddedLine as isAddedLine };
+/******/ export { __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__findMatchingDeletedLine as findMatchingDeletedLine, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__groupContiguousChanges as groupContiguousChanges, __webpack_exports__isAddedLine as isAddedLine };
 /******/ 
