@@ -54739,11 +54739,18 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       const { body, lineCount } = suggestionBody
 
       // Create appropriate comment based on line count
-      // Use the actual line numbers from the added changes
+      // Use the actual line numbers from AddedLine.lineAfter for correct targeting
       const addedLines = changes.filter(isAddedLine)
 
-      const startLine = addedLines[0].lineAfter
-      const endLine = addedLines[addedLines.length - 1].lineAfter
+      let startLine, endLine
+      if (addedLines.length === 0) {
+        // For pure deletions, use the line before the deletion started
+        startLine = fromFileRange.start + 1
+      } else {
+        // Use the actual line number where the first addition appears
+        startLine = addedLines[0].lineAfter
+      }
+      endLine = startLine + lineCount - 1
 
       const comment =
         lineCount === 1
