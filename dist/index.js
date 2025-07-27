@@ -54643,18 +54643,6 @@ const createSuggestion = (content) => {
 }
 
 /**
- * Get line number for positioning a change
- * @param {AnyLineChange} change
- * @returns {number | null}
- */
-const getChangeLineNumber = (change) => {
-  if (isDeletedLine(change)) return change.lineBefore
-  if (isAddedLine(change)) return change.lineAfter
-  if (isUnchangedLine(change)) return change.lineBefore
-  return null
-}
-
-/**
  * Group changes into contiguous blocks separated by unchanged lines
  * @param {AnyLineChange[]} changes
  * @returns {AnyLineChange[][]}
@@ -54667,20 +54655,34 @@ const groupContiguousChanges = (changes) => {
   let lastLineNumber = null
 
   for (const change of changes) {
-    const lineNumber = getChangeLineNumber(change)
-    if (lineNumber === null) continue
+    // Get the line number for positioning (use lineBefore for deletions, lineAfter for additions)
+    const lineNumber = isDeletedLine(change) 
+      ? change.lineBefore 
+      : isAddedLine(change) 
+        ? change.lineAfter 
+        : isUnchangedLine(change) 
+          ? change.lineBefore 
+          : null
 
-    // Start new group if there's a gap in line numbers
-    if (lastLineNumber !== null && lineNumber > lastLineNumber + 1) {
-      groups.push(currentGroup)
-      currentGroup = []
+    if (lineNumber === null) {
+      continue // Skip changes we can't position
     }
 
-    currentGroup.push(change)
+    // Start a new group if this is the first change or if there's a gap
+    if (lastLineNumber === null || lineNumber > lastLineNumber + 1) {
+      if (currentGroup.length > 0) {
+        groups.push(currentGroup)
+      }
+      currentGroup = [change]
+    } else {
+      // Add to current group if contiguous
+      currentGroup.push(change)
+    }
+
     lastLineNumber = lineNumber
   }
 
-  // Add the final group
+  // Don't forget the last group
   if (currentGroup.length > 0) {
     groups.push(currentGroup)
   }
@@ -54776,7 +54778,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
 
       // Group changes into contiguous blocks
       const contiguousGroups = groupContiguousChanges(changes)
-
+      
       // Process each contiguous group separately
       return contiguousGroups.flatMap((groupChanges) => {
         // Generate the suggestion body for this group
@@ -54798,11 +54800,37 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
         let startLine, endLine
 
         if (deletedLines.length > 0) {
-          // For deletions, position on the first deleted line
-          startLine = Math.min(...deletedLines.map(d => d.lineBefore))
+          // For deletions, we need to find the right line to position on
+          let targetDeletedLine = deletedLines[0] // fallback to first
+
+          if (addedLines.length > 0) {
+            // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
+            const linesToSuggest = addedLines.filter(({ content }) => {
+              const deletedContent = new Set(
+                deletedLines.map(({ content }) => content)
+              )
+              return !deletedContent.has(content)
+            })
+
+            if (linesToSuggest.length > 0) {
+              // Try to find a deleted line that corresponds to our suggested content
+              const suggestedContent = linesToSuggest[0].content
+              const matchingDeleted = deletedLines.find(
+                (deleted) =>
+                  // Look for a deleted line with similar content (ignoring whitespace differences)
+                  deleted.content.trim() === suggestedContent.trim()
+              )
+              if (matchingDeleted) {
+                targetDeletedLine = matchingDeleted
+              }
+            }
+          }
+
+          startLine = targetDeletedLine.lineBefore
           endLine = startLine + lineCount - 1
         } else if (unchangedLines.length > 0) {
-          // Pure additions with context - position on the unchanged line
+          // Pure additions with context - position on the unchanged line in PR head
+          // The context is included in the suggestion body for clarity
           startLine = unchangedLines[0].lineBefore
           endLine = startLine + lineCount - 1
         } else {
