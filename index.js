@@ -140,15 +140,7 @@ const generateSuggestionBody = (changes) => {
   }
 
   // If we have both added and deleted lines, only suggest lines that are actually different
-  const linesToSuggest =
-    deletedLines.length > 0
-      ? addedLines.filter(({ content }) => {
-          const deletedContent = new Set(
-            deletedLines.map(({ content }) => content)
-          )
-          return !deletedContent.has(content)
-        })
-      : addedLines // If only added lines (new content), include all of them
+  const linesToSuggest = getLinesToSuggest(addedLines, deletedLines)
 
   if (linesToSuggest.length === 0) {
     return null // No actual content changes to suggest
@@ -178,15 +170,35 @@ const generateSuggestionBody = (changes) => {
 }
 
 /**
+ * Get lines that are actually different (not duplicates of deleted content)
+ * @param {AddedLine[]} addedLines - Array of added lines
+ * @param {DeletedLine[]} deletedLines - Array of deleted lines
+ * @returns {AddedLine[]} Lines that represent actual changes
+ */
+const getLinesToSuggest = (addedLines, deletedLines) => {
+  if (deletedLines.length === 0) {
+    return addedLines // If only added lines (new content), include all of them
+  }
+
+  // If we have both added and deleted lines, only suggest lines that are actually different
+  return addedLines.filter(({ content }) => {
+    const deletedContent = new Set(deletedLines.map(({ content }) => content))
+    return !deletedContent.has(content)
+  })
+}
+
+/**
  * Find a deleted line that matches the suggested content
  * @param {DeletedLine[]} deletedLines - Array of deleted lines
  * @param {string} suggestedContent - Content to match against
  * @returns {DeletedLine | null} Matching deleted line or null
  */
 const findMatchingDeletedLine = (deletedLines, suggestedContent) => {
-  return deletedLines.find(
-    (deleted) => deleted.content.trim() === suggestedContent.trim()
-  ) || null
+  return (
+    deletedLines.find(
+      (deleted) => deleted.content.trim() === suggestedContent.trim()
+    ) || null
+  )
 }
 
 /**
@@ -212,18 +224,15 @@ const calculateLinePosition = (groupChanges, lineCount, fromFileRange) => {
 
     if (addedLines.length > 0) {
       // For mixed changes (deletions + additions), try to find the most relevant deleted line
-      // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
-      const linesToSuggest = addedLines.filter(({ content }) => {
-        const deletedContent = new Set(
-          deletedLines.map(({ content }) => content)
-        )
-        return !deletedContent.has(content)
-      })
+      const linesToSuggest = getLinesToSuggest(addedLines, deletedLines)
 
       if (linesToSuggest.length > 0) {
         // Try to find a deleted line that corresponds to our suggested content
         const suggestedContent = linesToSuggest[0].content
-        const matchingDeleted = findMatchingDeletedLine(deletedLines, suggestedContent)
+        const matchingDeleted = findMatchingDeletedLine(
+          deletedLines,
+          suggestedContent
+        )
         if (matchingDeleted) {
           targetDeletedLine = matchingDeleted
         }
@@ -325,7 +334,11 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
         }
 
         const { body, lineCount } = suggestionBody
-        const { startLine, endLine } = calculateLinePosition(groupChanges, lineCount, fromFileRange)
+        const { startLine, endLine } = calculateLinePosition(
+          groupChanges,
+          lineCount,
+          fromFileRange
+        )
 
         // Create appropriate comment based on line count
         const comment =
@@ -376,6 +389,7 @@ export {
   findMatchingDeletedLine,
   generateCommentKey,
   generateSuggestionBody,
+  getLinesToSuggest,
   groupContiguousChanges,
   isAddedLine
 }
