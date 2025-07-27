@@ -54616,7 +54616,7 @@ const generateSuggestionBody = (changes) => {
     // For deletions, suggest empty content (which will delete the lines)
     return {
       body: createSuggestion(''),
-      lineCount: removedLines.length
+      lineCount: removedLines.length,
     }
   }
 
@@ -54625,12 +54625,15 @@ const generateSuggestionBody = (changes) => {
   }
 
   // If we have both added and removed lines, only suggest lines that are actually different
-  const linesToSuggest = removedLines.length > 0
-    ? addedLines.filter(({ content }) => {
-        const removedContent = new Set(removedLines.map(({ content }) => content))
-        return !removedContent.has(content)
-      })
-    : addedLines // If only added lines (new content), include all of them
+  const linesToSuggest =
+    removedLines.length > 0
+      ? addedLines.filter(({ content }) => {
+          const removedContent = new Set(
+            removedLines.map(({ content }) => content)
+          )
+          return !removedContent.has(content)
+        })
+      : addedLines // If only added lines (new content), include all of them
 
   if (linesToSuggest.length === 0) {
     return null // No actual content changes to suggest
@@ -54638,22 +54641,23 @@ const generateSuggestionBody = (changes) => {
 
   // For pure additions (no removals), include context to make the suggestion clearer
   const isPureAddition = removedLines.length === 0
-  const contextLine = isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
-  
+  const contextLine =
+    isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
+
   // Build the suggestion content
-  const suggestionLines = contextLine 
+  const suggestionLines = contextLine
     ? [contextLine.content, ...linesToSuggest.map(({ content }) => content)]
     : linesToSuggest.map(({ content }) => content)
-  
+
   const suggestionBody = suggestionLines.join('\n')
-  
+
   // For pure additions with context, we want to position the comment on just the context line
   // The suggestion will show the context + new content, but only affect the context line
   const lineCount = contextLine ? 1 : linesToSuggest.length
-  
+
   return {
     body: createSuggestion(suggestionBody),
-    lineCount
+    lineCount,
   }
 }
 
@@ -54695,18 +54699,19 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       const { body, lineCount } = suggestionBody
 
       // Create appropriate comment based on line count
-      const comment = lineCount === 1
-        ? {
-            path,
-            line: fromFileRange.start,
-            body: body,
-          }
-        : {
-            path,
-            start_line: fromFileRange.start,
-            line: fromFileRange.start + lineCount - 1,
-            body: body,
-          }
+      const comment =
+        lineCount === 1
+          ? {
+              path,
+              line: fromFileRange.start,
+              body: body,
+            }
+          : {
+              path,
+              start_line: fromFileRange.start,
+              line: fromFileRange.start + lineCount - 1,
+              body: body,
+            }
 
       // Generate key for the new comment
       const commentKey = generateCommentKey(comment)
