@@ -195,6 +195,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       const { body, lineCount } = suggestionBody
 
       // Create appropriate comment based on line count
+      // Only target lines that are part of the diff hunk
       const addedLines = changes.filter(isAddedLine)
       const unchangedLines = changes.filter(isUnchangedLine)
 
@@ -203,15 +204,26 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
         // Target where the additions appear
         startLine = addedLines[0].lineAfter
       } else if (unchangedLines.length > 0) {
-        // For deletions, target any unchanged line
+        // For deletions, target any unchanged line that's part of the diff
         startLine = unchangedLines[0].lineAfter
       } else {
         // No valid target line, skip this chunk
         return []
       }
 
+      // For multi-line suggestions, ensure we don't exceed the diff hunk boundaries
+      const allLinesWithAfter = [...addedLines, ...unchangedLines]
+      const maxLineAfter = allLinesWithAfter.length > 0
+        ? Math.max(...allLinesWithAfter.map(c => c.lineAfter))
+        : startLine
+
+      const endLine = lineCount === 1 ? startLine : Math.min(
+        startLine + lineCount - 1,
+        maxLineAfter
+      )
+
       const comment =
-        lineCount === 1
+        lineCount === 1 || startLine === endLine
           ? {
               path,
               line: startLine,
@@ -220,7 +232,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
           : {
               path,
               start_line: startLine,
-              line: startLine + lineCount - 1,
+              line: endLine,
               body: body,
             }
 
