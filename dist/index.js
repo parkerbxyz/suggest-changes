@@ -54653,7 +54653,7 @@ const generateSuggestionBody = (changes) => {
 
   // Handle pure deletions (only deleted lines)
   if (addedLines.length === 0 && deletedLines.length > 0) {
-    // For deletions, suggest empty content (which will delete the lines)
+    // For pure deletions, suggest empty content
     return {
       body: createSuggestion(''),
       lineCount: deletedLines.length,
@@ -54739,18 +54739,20 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       const { body, lineCount } = suggestionBody
 
       // Create appropriate comment based on line count
-      // Use the actual line numbers from AddedLine.lineAfter for correct targeting
       const addedLines = changes.filter(isAddedLine)
+      const unchangedLines = changes.filter(isUnchangedLine)
 
-      let startLine, endLine
-      if (addedLines.length === 0) {
-        // For pure deletions, use the line before the deletion started
-        startLine = fromFileRange.start + 1
-      } else {
-        // Use the actual line number where the first addition appears
+      let startLine
+      if (addedLines.length > 0) {
+        // Target where the additions appear
         startLine = addedLines[0].lineAfter
+      } else if (unchangedLines.length > 0) {
+        // For deletions, target any unchanged line
+        startLine = unchangedLines[0].lineAfter
+      } else {
+        // No valid target line, skip this chunk
+        return []
       }
-      endLine = startLine + lineCount - 1
 
       const comment =
         lineCount === 1
@@ -54762,7 +54764,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
           : {
               path,
               start_line: startLine,
-              line: endLine,
+              line: startLine + lineCount - 1,
               body: body,
             }
 
