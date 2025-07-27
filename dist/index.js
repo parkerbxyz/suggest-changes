@@ -54749,31 +54749,26 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       if (deletedLines.length > 0) {
         // For deletions, we need to find the right line to position on
         let targetDeletedLine = deletedLines[0] // fallback to first
-        
-        // If we have mixed changes (both additions and deletions), try to find
-        // the deleted line that corresponds to our suggested content
-        if (addedLines.length > 0 && deletedLines.length > 1) {
-          // Get the content we're actually suggesting (same logic as generateSuggestionBody)
+
+        if (addedLines.length > 0) {
+          // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
           const linesToSuggest = addedLines.filter(({ content }) => {
-            const deletedContent = new Set(deletedLines.map(({ content }) => content))
+            const deletedContent = new Set(
+              deletedLines.map(({ content }) => content)
+            )
             return !deletedContent.has(content)
           })
 
           if (linesToSuggest.length > 0) {
-            // Look for non-empty deleted lines that might match our suggestion context
-            const nonEmptyDeleted = deletedLines.filter(deleted => deleted.content.trim() !== '')
-            if (nonEmptyDeleted.length > 0) {
-              // Try to find a deleted line with similar content
-              const suggestedContent = linesToSuggest[0].content
-              const matchingDeleted = nonEmptyDeleted.find(deleted =>
+            // Try to find a deleted line that corresponds to our suggested content
+            const suggestedContent = linesToSuggest[0].content
+            const matchingDeleted = deletedLines.find(
+              (deleted) =>
+                // Look for a deleted line with similar content (ignoring whitespace differences)
                 deleted.content.trim() === suggestedContent.trim()
-              )
-              if (matchingDeleted) {
-                targetDeletedLine = matchingDeleted
-              } else {
-                // If no exact match, use the last non-empty deleted line
-                targetDeletedLine = nonEmptyDeleted[nonEmptyDeleted.length - 1]
-              }
+            )
+            if (matchingDeleted) {
+              targetDeletedLine = matchingDeleted
             }
           }
         }
