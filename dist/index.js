@@ -54534,7 +54534,8 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 /* harmony export */   E_: () => (/* binding */ generateCommentKey),
 /* harmony export */   H9: () => (/* binding */ createSuggestion),
 /* harmony export */   Hw: () => (/* binding */ isAddedLine),
-/* harmony export */   MW: () => (/* binding */ generateSuggestionBody)
+/* harmony export */   MW: () => (/* binding */ generateSuggestionBody),
+/* harmony export */   ZY: () => (/* binding */ groupContiguousChanges)
 /* harmony export */ });
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(7484);
 /* harmony import */ var _actions_exec__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(5236);
@@ -54698,7 +54699,8 @@ const generateSuggestionBody = (changes) => {
     return null // No actual content changes to suggest
   }
 
-  // For pure additions (no deletions), include context to make the suggestion clearer
+  // For pure additions (no deletions), use the first unchanged line as context
+  // to show reviewers where the new additions should be placed
   const isPureAddition = deletedLines.length === 0
   const contextLine =
     isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
@@ -54750,7 +54752,9 @@ const pullRequestFiles = (
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
 const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
   'git',
-  // Ignore CR at EOL to avoid no-op suggestions
+  // The '--ignore-cr-at-eol' flag ensures that differences in line-ending styles (e.g., CRLF vs. LF)
+  // are ignored when generating the diff. This prevents unnecessary or no-op suggestions caused by
+  // line-ending mismatches, which can occur in cross-platform environments.
   ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
   { silent: true }
 )
@@ -54826,7 +54830,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
               const suggestedContent = linesToSuggest[0].content
               const matchingDeleted = deletedLines.find(
                 (deleted) =>
-                  // Look for a deleted line with similar content (ignoring whitespace differences)
+                  // Look for a deleted line with similar content (ignoring leading/trailing whitespace)
                   deleted.content.trim() === suggestedContent.trim()
               )
               if (matchingDeleted) {
@@ -59227,6 +59231,7 @@ function getFilePath(ctx, input, type) {
 /******/ var __webpack_exports__createSuggestion = __webpack_exports__.H9;
 /******/ var __webpack_exports__generateCommentKey = __webpack_exports__.E_;
 /******/ var __webpack_exports__generateSuggestionBody = __webpack_exports__.MW;
+/******/ var __webpack_exports__groupContiguousChanges = __webpack_exports__.ZY;
 /******/ var __webpack_exports__isAddedLine = __webpack_exports__.Hw;
-/******/ export { __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__isAddedLine as isAddedLine };
+/******/ export { __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__groupContiguousChanges as groupContiguousChanges, __webpack_exports__isAddedLine as isAddedLine };
 /******/ 
