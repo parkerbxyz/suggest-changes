@@ -54664,39 +54664,52 @@ const generateSuggestionBody = (changes) => {
     return null // No changes to suggest
   }
 
-  // If we have both added and deleted lines, only suggest lines that are actually different
-  const linesToSuggest =
-    deletedLines.length > 0
-      ? addedLines.filter(({ content }) => {
-          const deletedContent = new Set(
-            deletedLines.map(({ content }) => content)
-          )
-          return !deletedContent.has(content)
-        })
-      : addedLines // If only added lines (new content), include all of them
-
-  if (linesToSuggest.length === 0) {
-    return null // No actual content changes to suggest
-  }
-
   // For pure additions (no deletions), include context to make the suggestion clearer
   const isPureAddition = deletedLines.length === 0
-  const contextLine =
-    isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
+  if (isPureAddition) {
+    const contextLine = unchangedLines.length > 0 ? unchangedLines[0] : null
+    const suggestionLines = contextLine
+      ? [contextLine.content, ...addedLines.map(({ content }) => content)]
+      : addedLines.map(({ content }) => content)
 
-  // Build the suggestion content
-  const suggestionLines = contextLine
-    ? [contextLine.content, ...linesToSuggest.map(({ content }) => content)]
-    : linesToSuggest.map(({ content }) => content)
+    return {
+      body: createSuggestion(suggestionLines.join('\n')),
+      lineCount: contextLine ? 1 : addedLines.length,
+    }
+  }
 
-  const suggestionBody = suggestionLines.join('\n')
-
-  // For pure additions with context, we want to position the comment on just the context line
-  // The suggestion will show the context + new content, but only affect the context line
-  const lineCount = contextLine ? 1 : linesToSuggest.length
+  // For mixed changes (additions + deletions), include unchanged lines that fall between deletions
+  const firstDeletedLine = Math.min(...deletedLines.map(d => d.lineBefore))
+  const lastDeletedLine = Math.max(...deletedLines.map(d => d.lineBefore))
+  
+  // Find unchanged lines that fall between the first and last deleted lines
+  const unchangedInRange = unchangedLines.filter(line => 
+    line.lineBefore > firstDeletedLine && line.lineBefore < lastDeletedLine
+  )
+  
+  // Get actually new content (not just whitespace changes)
+  const actuallyNewLines = addedLines.filter(({ content }) => {
+    const deletedContent = new Set(deletedLines.map(({ content }) => content))
+    return !deletedContent.has(content)
+  })
+  
+  // Combine new content with unchanged lines in between, sorted by position
+  const allSuggestionContent = [...actuallyNewLines, ...unchangedInRange]
+    .sort((a, b) => {
+      const posA = isAddedLine(a) ? a.lineAfter : a.lineBefore
+      const posB = isAddedLine(b) ? b.lineAfter : b.lineBefore
+      return posA - posB
+    })
+  
+  if (allSuggestionContent.length === 0) {
+    return null
+  }
+  
+  const suggestionLines = allSuggestionContent.map(({ content }) => content)
+  const lineCount = lastDeletedLine - firstDeletedLine + 1
 
   return {
-    body: createSuggestion(suggestionBody),
+    body: createSuggestion(suggestionLines.join('\n')),
     lineCount,
   }
 }
@@ -54747,33 +54760,8 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       let startLine, endLine
 
       if (deletedLines.length > 0) {
-        // For deletions, we need to find the right line to position on
-        let targetDeletedLine = deletedLines[0] // fallback to first
-
-        if (addedLines.length > 0) {
-          // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
-          const linesToSuggest = addedLines.filter(({ content }) => {
-            const deletedContent = new Set(
-              deletedLines.map(({ content }) => content)
-            )
-            return !deletedContent.has(content)
-          })
-
-          if (linesToSuggest.length > 0) {
-            // Try to find a deleted line that corresponds to our suggested content
-            const suggestedContent = linesToSuggest[0].content
-            const matchingDeleted = deletedLines.find(
-              (deleted) =>
-                // Look for a deleted line with similar content (ignoring whitespace differences)
-                deleted.content.trim() === suggestedContent.trim()
-            )
-            if (matchingDeleted) {
-              targetDeletedLine = matchingDeleted
-            }
-          }
-        }
-
-        startLine = targetDeletedLine.lineBefore
+        // For deletions, position on the first deleted line and span the range
+        startLine = Math.min(...deletedLines.map(d => d.lineBefore))
         endLine = startLine + lineCount - 1
       } else if (unchangedLines.length > 0) {
         // Pure additions with context - position on the unchanged line in PR head
