@@ -54653,16 +54653,10 @@ const generateSuggestionBody = (changes) => {
 
   // Handle pure deletions (only deleted lines)
   if (addedLines.length === 0 && deletedLines.length > 0) {
-    // For deletions, include context to make the suggestion clearer
-    const contextLine = unchangedLines.length > 0 ? unchangedLines[0] : null
-
-    // Build the suggestion content
-    const suggestionBody = contextLine ? contextLine.content : ''
-    const lineCount = contextLine ? 1 : deletedLines.length
-
+    // For deletions, suggest empty content (which will delete the lines)
     return {
-      body: createSuggestion(suggestionBody),
-      lineCount,
+      body: createSuggestion(''),
+      lineCount: deletedLines.length,
     }
   }
 
@@ -54747,22 +54741,16 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       // Create appropriate comment based on line count
       // Use the actual line numbers from AddedLine.lineAfter for correct targeting
       const addedLines = changes.filter(isAddedLine)
-      const unchangedLines = changes.filter(isUnchangedLine)
 
-      // Determine the starting line for the comment
-      const startLine =
-        addedLines.length > 0
-          ? addedLines[0].lineAfter // Use the actual line number where the first addition appears
-          : unchangedLines.length > 0
-          ? unchangedLines[0].lineAfter // For pure deletions with context, use the unchanged line's position
-          : null // Skip suggestions for deletions without context
-
-      if (!startLine) {
-        // Skip suggestions for deletions without context - they're usually not actionable
-        return []
+      let startLine, endLine
+      if (addedLines.length === 0) {
+        // For pure deletions, use the line before the deletion started
+        startLine = fromFileRange.start + 1
+      } else {
+        // Use the actual line number where the first addition appears
+        startLine = addedLines[0].lineAfter
       }
-
-      const endLine = startLine + lineCount - 1
+      endLine = startLine + lineCount - 1
 
       const comment =
         lineCount === 1
