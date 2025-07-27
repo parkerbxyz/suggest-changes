@@ -48,6 +48,12 @@ function isUnchangedLine(change) {
 /** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
 /** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
 
+/**
+ * @typedef {Object} SuggestionBody
+ * @property {string} body
+ * @property {number} lineCount
+ */
+
 const octokit = new Octokit({
   userAgent: 'suggest-changes',
 })
@@ -94,73 +100,61 @@ const createSuggestion = (content) => {
 
 /**
  * @param {AnyLineChange[]} changes
- * @returns {Array<{body: string, lineAfter: number, startLineAfter?: number}>}
+ * @returns {SuggestionBody | null}
  */
-const generateIndividualSuggestions = (changes) => {
+const generateSuggestionBody = (changes) => {
   const addedLines = changes.filter(isAddedLine)
   const deletedLines = changes.filter(isDeletedLine)
+  const unchangedLines = changes.filter(isUnchangedLine)
 
-  // Filter out added lines that are identical to deleted lines (no real change)
-  const meaningfulAddedLines = addedLines.filter(addedLine => {
-    return deletedLines.length === 0 || 
-      !deletedLines.some(deletedLine => deletedLine.content === addedLine.content)
-  })
-
-  const suggestions = []
-
-  if (meaningfulAddedLines.length === 0 && deletedLines.length > 0) {
-    // Handle pure deletions
-    const unchangedLines = changes.filter(isUnchangedLine)
-    const firstDeletedLine = deletedLines[0].lineBefore
-    const contextLine = unchangedLines.find(line => line.lineBefore < firstDeletedLine)
-    
-    if (contextLine) {
-      suggestions.push({
-        body: createSuggestion(''),
-        lineAfter: contextLine.lineAfter
-      })
-    }
-  } else if (meaningfulAddedLines.length > 0) {
-    // Group consecutive added lines into multi-line suggestions
-    const groups = []
-    let currentGroup = [meaningfulAddedLines[0]]
-
-    for (let i = 1; i < meaningfulAddedLines.length; i++) {
-      const currentLine = meaningfulAddedLines[i]
-      const previousLine = meaningfulAddedLines[i - 1]
-      
-      // Check if this line is consecutive to the previous one
-      if (currentLine.lineAfter === previousLine.lineAfter + 1) {
-        currentGroup.push(currentLine)
-      } else {
-        // Start a new group
-        groups.push(currentGroup)
-        currentGroup = [currentLine]
-      }
-    }
-    groups.push(currentGroup) // Don't forget the last group
-
-    // Create suggestions for each group
-    for (const group of groups) {
-      if (group.length === 1) {
-        // Single line suggestion
-        suggestions.push({
-          body: createSuggestion(group[0].content),
-          lineAfter: group[0].lineAfter
-        })
-      } else {
-        // Multi-line suggestion
-        const content = group.map(line => line.content).join('\n')
-        suggestions.push({
-          body: createSuggestion(content),
-          lineAfter: group[group.length - 1].lineAfter, // End line
-          startLineAfter: group[0].lineAfter // Start line
-        })
-      }
+  // Handle pure deletions (only deleted lines)
+  if (addedLines.length === 0 && deletedLines.length > 0) {
+    // For deletions, suggest empty content (which will delete the lines)
+    return {
+      body: createSuggestion(''),
+      lineCount: deletedLines.length,
     }
   }
 
-  return suggestions
+  if (addedLines.length === 0) {
+    return null // No changes to suggest
+  }
+
+  // If we have both added and deleted lines, only suggest lines that are actually different
+  const linesToSuggest =
+    deletedLines.length > 0
+      ? addedLines.filter(({ content }) => {
+          const deletedContent = new Set(
+            deletedLines.map(({ content }) => content)
+          )
+          return !deletedContent.has(content)
+        })
+      : addedLines // If only added lines (new content), include all of them
+
+  if (linesToSuggest.length === 0) {
+    return null // No actual content changes to suggest
+  }
+
+  // For pure additions (no deletions), include context to make the suggestion clearer
+  const isPureAddition = deletedLines.length === 0
+  const contextLine =
+    isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
+
+  // Build the suggestion content
+  const suggestionLines = contextLine
+    ? [contextLine.content, ...linesToSuggest.map(({ content }) => content)]
+    : linesToSuggest.map(({ content }) => content)
+
+  const suggestionBody = suggestionLines.join('\n')
+
+  // For pure additions with context, we want to position the comment on just the context line
+  // The suggestion will show the context + new content, but only affect the context line
+  const lineCount = contextLine ? 1 : linesToSuggest.length
+
+  return {
+    body: createSuggestion(suggestionBody),
+    lineCount,
+  }
 }
 
 // Fetch existing review comments
@@ -185,45 +179,58 @@ const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks
     .filter((chunk) => chunk.type === 'Chunk') // Only process regular chunks
-    .flatMap(({ fromFileRange, toFileRange, changes }) => {
+    .flatMap(({ fromFileRange, changes }) => {
       debug(`Starting line (HEAD): ${fromFileRange.start}`)
       debug(`Number of lines: ${fromFileRange.lines}`)
-      debug(`Target range: ${JSON.stringify(toFileRange)}`)
       debug(`Changes: ${JSON.stringify(changes)}`)
 
-      // Generate individual suggestions for this chunk
-      const suggestions = generateIndividualSuggestions(changes)
+      // Generate the suggestion body for this chunk
+      const suggestionBody = generateSuggestionBody(changes)
 
-      // Skip if no suggestions were generated
-      if (suggestions.length === 0) {
+      // Skip if no suggestion was generated (no actual changes to suggest)
+      if (!suggestionBody) {
         return []
       }
 
-      // Create review comments for each suggestion
-      return suggestions.map(({ body, lineAfter, startLineAfter }) => {
-        const comment = startLineAfter
+      const { body, lineCount } = suggestionBody
+
+      // Create appropriate comment based on line count
+      // Use the actual line numbers from AddedLine.lineAfter for correct targeting
+      const addedLines = changes.filter(isAddedLine)
+
+      let startLine, endLine
+      if (addedLines.length === 0) {
+        // For pure deletions, use the line before the deletion started
+        startLine = fromFileRange.start + 1
+      } else {
+        // Use the actual line number where the first addition appears
+        startLine = addedLines[0].lineAfter
+      }
+      endLine = startLine + lineCount - 1
+
+      const comment =
+        lineCount === 1
           ? {
               path,
-              start_line: startLineAfter,
-              line: lineAfter,
+              line: startLine,
               body: body,
             }
           : {
               path,
-              line: lineAfter,
+              start_line: startLine,
+              line: endLine,
               body: body,
             }
 
-        // Generate key for the new comment
-        const commentKey = generateCommentKey(comment)
+      // Generate key for the new comment
+      const commentKey = generateCommentKey(comment)
 
-        // Check if the new comment already exists
-        if (existingCommentKeys.has(commentKey)) {
-          return null
-        }
+      // Check if the new comment already exists
+      if (existingCommentKeys.has(commentKey)) {
+        return []
+      }
 
-        return comment
-      }).filter(comment => comment !== null)
+      return [comment]
     })
 )
 
@@ -242,4 +249,4 @@ if (comments.length > 0) {
 }
 
 // Export for testing
-export { createSuggestion, generateCommentKey, generateIndividualSuggestions, isAddedLine }
+export { createSuggestion, generateCommentKey, generateSuggestionBody, isAddedLine }
