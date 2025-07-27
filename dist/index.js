@@ -54596,6 +54596,7 @@ function isUnchangedLine(change) {
  * @typedef {Object} SuggestionBody
  * @property {string} body
  * @property {number} lineCount
+ * @property {number[]} [usedLineNumbers]
  */
 
 const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_5__/* .Octokit */ .Eg({
@@ -54695,6 +54696,7 @@ const generateSuggestionBody = (changes) => {
   
   // Build the suggestion by processing lines in order of their original position
   const suggestionLines = []
+  const usedLineNumbers = []
   
   // Process each line in the deleted range
   for (let lineNum = firstDeletedLine; lineNum <= lastDeletedLine; lineNum++) {
@@ -54708,6 +54710,7 @@ const generateSuggestionBody = (changes) => {
       })
       if (replacementContent) {
         suggestionLines.push(replacementContent.content)
+        usedLineNumbers.push(lineNum)
       }
       continue
     }
@@ -54716,6 +54719,7 @@ const generateSuggestionBody = (changes) => {
     const unchangedLine = unchangedInRange.find(u => u.lineBefore === lineNum)
     if (unchangedLine) {
       suggestionLines.push(unchangedLine.content)
+      usedLineNumbers.push(lineNum)
     }
   }
   
@@ -54731,11 +54735,13 @@ const generateSuggestionBody = (changes) => {
     return null
   }
   
-  const lineCount = lastDeletedLine - firstDeletedLine + 1
+  // Calculate line count based on the actual content lines, not the full range
+  const lineCount = suggestionLines.length
 
   return {
     body: createSuggestion(suggestionLines.join('\n')),
     lineCount,
+    usedLineNumbers,
   }
 }
 
@@ -54785,9 +54791,20 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       let startLine, endLine
 
       if (deletedLines.length > 0) {
-        // For deletions, position on the first deleted line and span the range
+        // For deletions, position on the first deleted line
         startLine = Math.min(...deletedLines.map(d => d.lineBefore))
-        endLine = startLine + lineCount - 1
+        
+        // For mixed changes, check if we have content lines tracked
+        if (suggestionBody.usedLineNumbers && suggestionBody.usedLineNumbers.length > 0) {
+          // Use the actual range of lines that have content in the suggestion
+          const minUsedLine = Math.min(...suggestionBody.usedLineNumbers)
+          const maxUsedLine = Math.max(...suggestionBody.usedLineNumbers)
+          startLine = minUsedLine
+          endLine = maxUsedLine
+        } else {
+          // Fallback to content-based line count
+          endLine = startLine + lineCount - 1
+        }
       } else if (unchangedLines.length > 0) {
         // Pure additions with context - position on the unchanged line in PR head
         // The context is included in the suggestion body for clarity
