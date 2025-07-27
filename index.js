@@ -8,6 +8,21 @@ import { readFileSync } from 'node:fs'
 import { env } from 'node:process'
 import parseGitDiff from 'parse-git-diff'
 
+/** @typedef {import('parse-git-diff').AnyLineChange} AnyLineChange */
+/** @typedef {import('parse-git-diff').AddedLine} AddedLine */
+/** @typedef {import('parse-git-diff').DeletedLine} DeletedLine */
+/** @typedef {import('parse-git-diff').UnchangedLine} UnchangedLine */
+/** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
+/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
+/** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
+/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
+
+/**
+ * @typedef {Object} SuggestionBody
+ * @property {string} body
+ * @property {number} lineCount
+ */
+
 /**
  * Type guard to check if a change is an AddedLine
  * @param {AnyLineChange} change - The change to check
@@ -38,21 +53,6 @@ function isUnchangedLine(change) {
     typeof change.lineAfter === 'number'
   )
 }
-
-/** @typedef {import('parse-git-diff').AnyLineChange} AnyLineChange */
-/** @typedef {import('parse-git-diff').AddedLine} AddedLine */
-/** @typedef {import('parse-git-diff').DeletedLine} DeletedLine */
-/** @typedef {import('parse-git-diff').UnchangedLine} UnchangedLine */
-/** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
-/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
-/** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
-/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
-
-/**
- * @typedef {Object} SuggestionBody
- * @property {string} body
- * @property {number} lineCount
- */
 
 const octokit = new Octokit({
   userAgent: 'suggest-changes',
