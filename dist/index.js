@@ -54747,11 +54747,13 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       let startLine, endLine
 
       if (deletedLines.length > 0) {
-        // If we have deletions, use the first deleted line's position in the PR head
-        startLine = deletedLines[0].lineBefore
+        // If we have deletions, use the last deleted line's position in the PR head
+        // This ensures suggestions appear on the most relevant line being changed
+        startLine = deletedLines[deletedLines.length - 1].lineBefore
         endLine = startLine + lineCount - 1
       } else if (unchangedLines.length > 0) {
-        // If we have unchanged lines (pure additions with context), use the unchanged line's position in PR head
+        // Pure additions with context - position on the unchanged line in PR head
+        // The context is included in the suggestion body for clarity
         startLine = unchangedLines[0].lineBefore
         endLine = startLine + lineCount - 1
       } else {
