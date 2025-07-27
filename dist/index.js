@@ -54656,13 +54656,13 @@ const groupContiguousChanges = (changes) => {
 
   for (const change of changes) {
     // Get the line number for positioning (use lineBefore for deletions, lineAfter for additions)
-    const lineNumber = isDeletedLine(change) 
-      ? change.lineBefore 
-      : isAddedLine(change) 
-        ? change.lineAfter 
-        : isUnchangedLine(change) 
-          ? change.lineBefore 
-          : null
+    const lineNumber = isDeletedLine(change)
+      ? change.lineBefore
+      : isAddedLine(change)
+      ? change.lineAfter
+      : isUnchangedLine(change)
+      ? change.lineBefore
+      : null
 
     if (lineNumber === null) {
       continue // Skip changes we can't position
@@ -54778,7 +54778,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
 
       // Group changes into contiguous blocks
       const contiguousGroups = groupContiguousChanges(changes)
-      
+
       // Process each contiguous group separately
       return contiguousGroups.flatMap((groupChanges) => {
         // Generate the suggestion body for this group
