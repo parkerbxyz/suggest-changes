@@ -54534,7 +54534,7 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 /* harmony export */   E_: () => (/* binding */ generateCommentKey),
 /* harmony export */   H9: () => (/* binding */ createSuggestion),
 /* harmony export */   Hw: () => (/* binding */ isAddedLine),
-/* harmony export */   MW: () => (/* binding */ generateSuggestionBody)
+/* harmony export */   Y6: () => (/* binding */ generateIndividualSuggestions)
 /* harmony export */ });
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(7484);
 /* harmony import */ var _actions_exec__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(5236);
@@ -54592,12 +54592,6 @@ function isUnchangedLine(change) {
 /** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
 /** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
 
-/**
- * @typedef {Object} SuggestionBody
- * @property {string} body
- * @property {number} lineCount
- */
-
 const octokit = new _octokit_action__WEBPACK_IMPORTED_MODULE_5__/* .Octokit */ .Eg({
   userAgent: 'suggest-changes',
 })
@@ -54644,61 +54638,73 @@ const createSuggestion = (content) => {
 
 /**
  * @param {AnyLineChange[]} changes
- * @returns {SuggestionBody | null}
+ * @returns {Array<{body: string, lineAfter: number, startLineAfter?: number}>}
  */
-const generateSuggestionBody = (changes) => {
+const generateIndividualSuggestions = (changes) => {
   const addedLines = changes.filter(isAddedLine)
   const deletedLines = changes.filter(isDeletedLine)
-  const unchangedLines = changes.filter(isUnchangedLine)
 
-  // Handle pure deletions (only deleted lines)
-  if (addedLines.length === 0 && deletedLines.length > 0) {
-    // For deletions, suggest empty content (which will delete the lines)
-    return {
-      body: createSuggestion(''),
-      lineCount: deletedLines.length,
+  // Filter out added lines that are identical to deleted lines (no real change)
+  const meaningfulAddedLines = addedLines.filter(addedLine => {
+    return deletedLines.length === 0 || 
+      !deletedLines.some(deletedLine => deletedLine.content === addedLine.content)
+  })
+
+  const suggestions = []
+
+  if (meaningfulAddedLines.length === 0 && deletedLines.length > 0) {
+    // Handle pure deletions
+    const unchangedLines = changes.filter(isUnchangedLine)
+    const firstDeletedLine = deletedLines[0].lineBefore
+    const contextLine = unchangedLines.find(line => line.lineBefore < firstDeletedLine)
+    
+    if (contextLine) {
+      suggestions.push({
+        body: createSuggestion(''),
+        lineAfter: contextLine.lineAfter
+      })
+    }
+  } else if (meaningfulAddedLines.length > 0) {
+    // Group consecutive added lines into multi-line suggestions
+    const groups = []
+    let currentGroup = [meaningfulAddedLines[0]]
+
+    for (let i = 1; i < meaningfulAddedLines.length; i++) {
+      const currentLine = meaningfulAddedLines[i]
+      const previousLine = meaningfulAddedLines[i - 1]
+      
+      // Check if this line is consecutive to the previous one
+      if (currentLine.lineAfter === previousLine.lineAfter + 1) {
+        currentGroup.push(currentLine)
+      } else {
+        // Start a new group
+        groups.push(currentGroup)
+        currentGroup = [currentLine]
+      }
+    }
+    groups.push(currentGroup) // Don't forget the last group
+
+    // Create suggestions for each group
+    for (const group of groups) {
+      if (group.length === 1) {
+        // Single line suggestion
+        suggestions.push({
+          body: createSuggestion(group[0].content),
+          lineAfter: group[0].lineAfter
+        })
+      } else {
+        // Multi-line suggestion
+        const content = group.map(line => line.content).join('\n')
+        suggestions.push({
+          body: createSuggestion(content),
+          lineAfter: group[group.length - 1].lineAfter, // End line
+          startLineAfter: group[0].lineAfter // Start line
+        })
+      }
     }
   }
 
-  if (addedLines.length === 0) {
-    return null // No changes to suggest
-  }
-
-  // If we have both added and deleted lines, only suggest lines that are actually different
-  const linesToSuggest =
-    deletedLines.length > 0
-      ? addedLines.filter(({ content }) => {
-          const deletedContent = new Set(
-            deletedLines.map(({ content }) => content)
-          )
-          return !deletedContent.has(content)
-        })
-      : addedLines // If only added lines (new content), include all of them
-
-  if (linesToSuggest.length === 0) {
-    return null // No actual content changes to suggest
-  }
-
-  // For pure additions (no deletions), include context to make the suggestion clearer
-  const isPureAddition = deletedLines.length === 0
-  const contextLine =
-    isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
-
-  // Build the suggestion content
-  const suggestionLines = contextLine
-    ? [contextLine.content, ...linesToSuggest.map(({ content }) => content)]
-    : linesToSuggest.map(({ content }) => content)
-
-  const suggestionBody = suggestionLines.join('\n')
-
-  // For pure additions with context, we want to position the comment on just the context line
-  // The suggestion will show the context + new content, but only affect the context line
-  const lineCount = contextLine ? 1 : linesToSuggest.length
-
-  return {
-    body: createSuggestion(suggestionBody),
-    lineCount,
-  }
+  return suggestions
 }
 
 // Fetch existing review comments
@@ -54723,58 +54729,45 @@ const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks
     .filter((chunk) => chunk.type === 'Chunk') // Only process regular chunks
-    .flatMap(({ fromFileRange, changes }) => {
+    .flatMap(({ fromFileRange, toFileRange, changes }) => {
       ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line (HEAD): ${fromFileRange.start}`)
       ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${fromFileRange.lines}`)
+      ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Target range: ${JSON.stringify(toFileRange)}`)
       ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
 
-      // Generate the suggestion body for this chunk
-      const suggestionBody = generateSuggestionBody(changes)
+      // Generate individual suggestions for this chunk
+      const suggestions = generateIndividualSuggestions(changes)
 
-      // Skip if no suggestion was generated (no actual changes to suggest)
-      if (!suggestionBody) {
+      // Skip if no suggestions were generated
+      if (suggestions.length === 0) {
         return []
       }
 
-      const { body, lineCount } = suggestionBody
-
-      // Create appropriate comment based on line count
-      // Use the actual line numbers from AddedLine.lineAfter for correct targeting
-      const addedLines = changes.filter(isAddedLine)
-
-      let startLine, endLine
-      if (addedLines.length === 0) {
-        // For pure deletions, use the line before the deletion started
-        startLine = fromFileRange.start + 1
-      } else {
-        // Use the actual line number where the first addition appears
-        startLine = addedLines[0].lineAfter
-      }
-      endLine = startLine + lineCount - 1
-
-      const comment =
-        lineCount === 1
+      // Create review comments for each suggestion
+      return suggestions.map(({ body, lineAfter, startLineAfter }) => {
+        const comment = startLineAfter
           ? {
               path,
-              line: startLine,
+              start_line: startLineAfter,
+              line: lineAfter,
               body: body,
             }
           : {
               path,
-              start_line: startLine,
-              line: endLine,
+              line: lineAfter,
               body: body,
             }
 
-      // Generate key for the new comment
-      const commentKey = generateCommentKey(comment)
+        // Generate key for the new comment
+        const commentKey = generateCommentKey(comment)
 
-      // Check if the new comment already exists
-      if (existingCommentKeys.has(commentKey)) {
-        return []
-      }
+        // Check if the new comment already exists
+        if (existingCommentKeys.has(commentKey)) {
+          return null
+        }
 
-      return [comment]
+        return comment
+      }).filter(comment => comment !== null)
     })
 )
 
@@ -59127,7 +59120,7 @@ function getFilePath(ctx, input, type) {
 /******/ __webpack_exports__ = await __webpack_exports__;
 /******/ var __webpack_exports__createSuggestion = __webpack_exports__.H9;
 /******/ var __webpack_exports__generateCommentKey = __webpack_exports__.E_;
-/******/ var __webpack_exports__generateSuggestionBody = __webpack_exports__.MW;
+/******/ var __webpack_exports__generateIndividualSuggestions = __webpack_exports__.Y6;
 /******/ var __webpack_exports__isAddedLine = __webpack_exports__.Hw;
-/******/ export { __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__isAddedLine as isAddedLine };
+/******/ export { __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateIndividualSuggestions as generateIndividualSuggestions, __webpack_exports__isAddedLine as isAddedLine };
 /******/ 
