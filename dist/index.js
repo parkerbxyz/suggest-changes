@@ -54747,33 +54747,8 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       let startLine, endLine
 
       if (deletedLines.length > 0) {
-        // If we have deletions, find the deleted line that corresponds to our suggestion
-        // For mixed changes, we want to position on the deleted line that matches our suggested content
-        let targetDeletedLine = deletedLines[0] // fallback to first
-
-        if (addedLines.length > 0) {
-          // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
-          const linesToSuggest = addedLines.filter(({ content }) => {
-            const deletedContent = new Set(
-              deletedLines.map(({ content }) => content)
-            )
-            return !deletedContent.has(content)
-          })
-
-          if (linesToSuggest.length > 0) {
-            // Try to find a deleted line that corresponds to our suggested content
-            const suggestedContent = linesToSuggest[0].content
-            const matchingDeleted = deletedLines.find(deleted =>
-              // Look for a deleted line with similar content (ignoring whitespace differences)
-              deleted.content.trim() === suggestedContent.trim()
-            )
-            if (matchingDeleted) {
-              targetDeletedLine = matchingDeleted
-            }
-          }
-        }
-
-        startLine = targetDeletedLine.lineBefore
+        // Simple approach: use the first deleted line for positioning
+        startLine = deletedLines[0].lineBefore
         endLine = startLine + lineCount - 1
       } else if (unchangedLines.length > 0) {
         // Pure additions with context - position on the unchanged line in PR head
