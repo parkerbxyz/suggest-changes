@@ -54618,7 +54618,7 @@ const pullRequestFiles = (
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
 const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
   'git',
-  ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
+  ['diff', '--unified=0', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
   { silent: true }
 )
 
@@ -54679,16 +54679,25 @@ const generateSuggestionBody = (changes) => {
     return null // No actual content changes to suggest
   }
 
-  // Build suggestion including unchanged context and new/changed lines
-  const allSuggestionLines = [
-    ...unchangedLines.map(({ content }) => content),
-    ...linesToSuggest.map(({ content }) => content),
-  ]
+  // For pure additions (no deletions), include context to make the suggestion clearer
+  const isPureAddition = deletedLines.length === 0
+  const contextLine =
+    isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
 
-  const suggestionBody = allSuggestionLines.join('\n')
+  // Build the suggestion content
+  const suggestionLines = contextLine
+    ? [contextLine.content, ...linesToSuggest.map(({ content }) => content)]
+    : linesToSuggest.map(({ content }) => content)
+
+  const suggestionBody = suggestionLines.join('\n')
+
+  // For pure additions with context, we want to position the comment on just the context line
+  // The suggestion will show the context + new content, but only affect the context line
+  const lineCount = contextLine ? 1 : linesToSuggest.length
+
   return {
     body: createSuggestion(suggestionBody),
-    lineCount: unchangedLines.length + linesToSuggest.length,
+    lineCount,
   }
 }
 
