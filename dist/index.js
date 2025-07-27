@@ -54527,9 +54527,15 @@ __webpack_unused_export__ = defaultContentType
 /***/ }),
 
 /***/ 5483:
-/***/ ((__webpack_module__, __unused_webpack___webpack_exports__, __nccwpck_require__) => {
+/***/ ((__webpack_module__, __webpack_exports__, __nccwpck_require__) => {
 
 __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependencies__, __webpack_async_result__) => { try {
+/* harmony export */ __nccwpck_require__.d(__webpack_exports__, {
+/* harmony export */   E_: () => (/* binding */ generateCommentKey),
+/* harmony export */   H9: () => (/* binding */ createSuggestion),
+/* harmony export */   Hw: () => (/* binding */ isAddedLine),
+/* harmony export */   MW: () => (/* binding */ generateSuggestionBody)
+/* harmony export */ });
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(7484);
 /* harmony import */ var _actions_exec__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(5236);
 /* harmony import */ var _octokit_action__WEBPACK_IMPORTED_MODULE_5__ = __nccwpck_require__(5545);
@@ -54546,7 +54552,41 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 
 
 
+/**
+ * Type guard to check if a change is an AddedLine
+ * @param {any} change - The change to check
+ * @returns {change is AddedLine} True if the change is an AddedLine
+ */
+function isAddedLine(change) {
+  return change?.type === 'AddedLine' && typeof change.lineAfter === 'number'
+}
+
+/**
+ * Type guard to check if a change is a DeletedLine
+ * @param {any} change - The change to check
+ * @returns {change is DeletedLine} True if the change is a DeletedLine
+ */
+function isDeletedLine(change) {
+  return change?.type === 'DeletedLine' && typeof change.lineBefore === 'number'
+}
+
+/**
+ * Type guard to check if a change is an UnchangedLine
+ * @param {any} change - The change to check
+ * @returns {change is UnchangedLine} True if the change is an UnchangedLine
+ */
+function isUnchangedLine(change) {
+  return (
+    change?.type === 'UnchangedLine' &&
+    typeof change.lineBefore === 'number' &&
+    typeof change.lineAfter === 'number'
+  )
+}
+
 /** @typedef {import('parse-git-diff').AnyLineChange} AnyLineChange */
+/** @typedef {import('parse-git-diff').AddedLine} AddedLine */
+/** @typedef {import('parse-git-diff').DeletedLine} DeletedLine */
+/** @typedef {import('parse-git-diff').UnchangedLine} UnchangedLine */
 /** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
 /** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
 /** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
@@ -54607,16 +54647,22 @@ const createSuggestion = (content) => {
  * @returns {SuggestionBody | null}
  */
 const generateSuggestionBody = (changes) => {
-  const addedLines = changes.filter(({ type }) => type === 'AddedLine')
-  const removedLines = changes.filter(({ type }) => type === 'DeletedLine')
-  const unchangedLines = changes.filter(({ type }) => type === 'UnchangedLine')
+  const addedLines = changes.filter(isAddedLine)
+  const deletedLines = changes.filter(isDeletedLine)
+  const unchangedLines = changes.filter(isUnchangedLine)
 
-  // Handle pure deletions (only removed lines)
-  if (addedLines.length === 0 && removedLines.length > 0) {
-    // For deletions, suggest empty content (which will delete the lines)
+  // Handle pure deletions (only deleted lines)
+  if (addedLines.length === 0 && deletedLines.length > 0) {
+    // For deletions, include context to make the suggestion clearer
+    const contextLine = unchangedLines.length > 0 ? unchangedLines[0] : null
+
+    // Build the suggestion content
+    const suggestionBody = contextLine ? contextLine.content : ''
+    const lineCount = contextLine ? 1 : deletedLines.length
+
     return {
-      body: createSuggestion(''),
-      lineCount: removedLines.length,
+      body: createSuggestion(suggestionBody),
+      lineCount,
     }
   }
 
@@ -54624,14 +54670,14 @@ const generateSuggestionBody = (changes) => {
     return null // No changes to suggest
   }
 
-  // If we have both added and removed lines, only suggest lines that are actually different
+  // If we have both added and deleted lines, only suggest lines that are actually different
   const linesToSuggest =
-    removedLines.length > 0
+    deletedLines.length > 0
       ? addedLines.filter(({ content }) => {
-          const removedContent = new Set(
-            removedLines.map(({ content }) => content)
+          const deletedContent = new Set(
+            deletedLines.map(({ content }) => content)
           )
-          return !removedContent.has(content)
+          return !deletedContent.has(content)
         })
       : addedLines // If only added lines (new content), include all of them
 
@@ -54639,8 +54685,8 @@ const generateSuggestionBody = (changes) => {
     return null // No actual content changes to suggest
   }
 
-  // For pure additions (no removals), include context to make the suggestion clearer
-  const isPureAddition = removedLines.length === 0
+  // For pure additions (no deletions), include context to make the suggestion clearer
+  const isPureAddition = deletedLines.length === 0
   const contextLine =
     isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
 
@@ -54684,7 +54730,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks
     .filter((chunk) => chunk.type === 'Chunk') // Only process regular chunks
     .flatMap(({ fromFileRange, changes }) => {
-      ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${fromFileRange.start}`)
+      ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line (HEAD): ${fromFileRange.start}`)
       ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${fromFileRange.lines}`)
       ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
 
@@ -54699,17 +54745,36 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       const { body, lineCount } = suggestionBody
 
       // Create appropriate comment based on line count
+      // Use the actual line numbers from AddedLine.lineAfter for correct targeting
+      const addedLines = changes.filter(isAddedLine)
+      const unchangedLines = changes.filter(isUnchangedLine)
+
+      // Determine the starting line for the comment
+      const startLine =
+        addedLines.length > 0
+          ? addedLines[0].lineAfter // Use the actual line number where the first addition appears
+          : unchangedLines.length > 0
+          ? unchangedLines[0].lineAfter // For pure deletions with context, use the unchanged line's position
+          : null // Skip suggestions for deletions without context
+
+      if (!startLine) {
+        // Skip suggestions for deletions without context - they're usually not actionable
+        return []
+      }
+
+      const endLine = startLine + lineCount - 1
+
       const comment =
         lineCount === 1
           ? {
               path,
-              line: fromFileRange.start,
+              line: startLine,
               body: body,
             }
           : {
               path,
-              start_line: fromFileRange.start,
-              line: fromFileRange.start + lineCount - 1,
+              start_line: startLine,
+              line: endLine,
               body: body,
             }
 
@@ -54738,6 +54803,9 @@ if (comments.length > 0) {
     comments,
   })
 }
+
+// Export for testing
+
 
 __webpack_async_result__();
 } catch(e) { __webpack_async_result__(e); } }, 1);
@@ -59069,4 +59137,9 @@ function getFilePath(ctx, input, type) {
 /******/ // This entry module used 'module' so it can't be inlined
 /******/ var __webpack_exports__ = __nccwpck_require__(5483);
 /******/ __webpack_exports__ = await __webpack_exports__;
+/******/ var __webpack_exports__createSuggestion = __webpack_exports__.H9;
+/******/ var __webpack_exports__generateCommentKey = __webpack_exports__.E_;
+/******/ var __webpack_exports__generateSuggestionBody = __webpack_exports__.MW;
+/******/ var __webpack_exports__isAddedLine = __webpack_exports__.Hw;
+/******/ export { __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__isAddedLine as isAddedLine };
 /******/ 
