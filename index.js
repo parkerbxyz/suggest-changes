@@ -10,7 +10,7 @@ import parseGitDiff from 'parse-git-diff'
 
 /**
  * Type guard to check if a change is an AddedLine
- * @param {any} change - The change to check
+ * @param {AnyLineChange} change - The change to check
  * @returns {change is AddedLine} True if the change is an AddedLine
  */
 function isAddedLine(change) {
@@ -19,7 +19,7 @@ function isAddedLine(change) {
 
 /**
  * Type guard to check if a change is a DeletedLine
- * @param {any} change - The change to check
+ * @param {AnyLineChange} change - The change to check
  * @returns {change is DeletedLine} True if the change is a DeletedLine
  */
 function isDeletedLine(change) {
@@ -28,7 +28,7 @@ function isDeletedLine(change) {
 
 /**
  * Type guard to check if a change is an UnchangedLine
- * @param {any} change - The change to check
+ * @param {AnyLineChange} change - The change to check
  * @returns {change is UnchangedLine} True if the change is an UnchangedLine
  */
 function isUnchangedLine(change) {
