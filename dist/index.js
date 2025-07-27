@@ -54609,9 +54609,14 @@ const createSuggestion = (content) => {
 }
 
 /**
- * Group changes into contiguous blocks separated by unchanged lines
- * @param {AnyLineChange[]} changes
- * @returns {AnyLineChange[][]}
+ * Group changes into contiguous blocks separated by line gaps.
+ * This prevents independent changes (like separate trailing space fixes)
+ * from being combined into a single suggestion that would contain duplicate content.
+ *
+ * @param {AnyLineChange[]} changes - Array of line changes from git diff
+ * @returns {AnyLineChange[][]} Array of contiguous change groups
+ * @example
+ * // Changes on lines 1, 2, 5, 6 would be grouped as: [[line1, line2], [line5, line6]]
  */
 const groupContiguousChanges = (changes) => {
   if (changes.length === 0) return []
@@ -54792,8 +54797,9 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
 
         const { body, lineCount } = suggestionBody
 
-        // Calculate the correct line position for GitHub review comments
-        // We need line numbers that exist in the PR head (the "before" state)
+        // Calculate the correct line position for GitHub review comments.
+        // GitHub requires line numbers that exist in the PR head (the "before" state).
+        // We need to handle different scenarios: deletions, additions, and mixed changes.
         const addedLines = groupChanges.filter(isAddedLine)
         const deletedLines = groupChanges.filter(isDeletedLine)
         const unchangedLines = groupChanges.filter(isUnchangedLine)
@@ -54801,10 +54807,12 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
         let startLine, endLine
 
         if (deletedLines.length > 0) {
-          // For deletions, we need to find the right line to position on
+          // SCENARIO 1: Changes with deletions
+          // Position the comment on a deleted line that exists in the PR head
           let targetDeletedLine = deletedLines[0] // fallback to first
 
           if (addedLines.length > 0) {
+            // For mixed changes (deletions + additions), try to find the most relevant deleted line
             // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
             const linesToSuggest = addedLines.filter(({ content }) => {
               const deletedContent = new Set(
@@ -54830,12 +54838,13 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
           startLine = targetDeletedLine.lineBefore
           endLine = startLine + lineCount - 1
         } else if (unchangedLines.length > 0) {
-          // Pure additions with context - position on the unchanged line in PR head
-          // The context is included in the suggestion body for clarity
+          // SCENARIO 2: Pure additions with context
+          // Position on the unchanged line in PR head. The context is included in the suggestion body for clarity.
           startLine = unchangedLines[0].lineBefore
           endLine = startLine + lineCount - 1
         } else {
-          // Pure additions without context - use fromFileRange as fallback
+          // SCENARIO 3: Pure additions without context
+          // Use fromFileRange as fallback positioning
           startLine = fromFileRange.start
           endLine = startLine + lineCount - 1
         }
