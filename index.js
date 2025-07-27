@@ -99,6 +99,54 @@ const createSuggestion = (content) => {
 }
 
 /**
+ * Group changes into contiguous blocks separated by unchanged lines
+ * @param {AnyLineChange[]} changes
+ * @returns {AnyLineChange[][]}
+ */
+const groupContiguousChanges = (changes) => {
+  if (changes.length === 0) return []
+
+  const groups = []
+  let currentGroup = []
+  let lastLineNumber = null
+
+  for (const change of changes) {
+    // Get the line number for positioning (use lineBefore for deletions, lineAfter for additions)
+    const lineNumber = isDeletedLine(change)
+      ? change.lineBefore
+      : isAddedLine(change)
+      ? change.lineAfter
+      : isUnchangedLine(change)
+      ? change.lineBefore
+      : null
+
+    if (lineNumber === null) {
+      continue // Skip changes we can't position
+    }
+
+    // Start a new group if this is the first change or if there's a gap
+    if (lastLineNumber === null || lineNumber > lastLineNumber + 1) {
+      if (currentGroup.length > 0) {
+        groups.push(currentGroup)
+      }
+      currentGroup = [change]
+    } else {
+      // Add to current group if contiguous
+      currentGroup.push(change)
+    }
+
+    lastLineNumber = lineNumber
+  }
+
+  // Don't forget the last group
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup)
+  }
+
+  return groups
+}
+
+/**
  * @param {AnyLineChange[]} changes
  * @returns {SuggestionBody | null}
  */
@@ -184,88 +232,94 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       debug(`Number of lines: ${fromFileRange.lines}`)
       debug(`Changes: ${JSON.stringify(changes)}`)
 
-      // Generate the suggestion body for this chunk
-      const suggestionBody = generateSuggestionBody(changes)
+      // Group changes into contiguous blocks
+      const contiguousGroups = groupContiguousChanges(changes)
 
-      // Skip if no suggestion was generated (no actual changes to suggest)
-      if (!suggestionBody) {
-        return []
-      }
+      // Process each contiguous group separately
+      return contiguousGroups.flatMap((groupChanges) => {
+        // Generate the suggestion body for this group
+        const suggestionBody = generateSuggestionBody(groupChanges)
 
-      const { body, lineCount } = suggestionBody
-
-      // Calculate the correct line position for GitHub review comments
-      // We need line numbers that exist in the PR head (the "before" state)
-      const addedLines = changes.filter(isAddedLine)
-      const deletedLines = changes.filter(isDeletedLine)
-      const unchangedLines = changes.filter(isUnchangedLine)
-
-      let startLine, endLine
-
-      if (deletedLines.length > 0) {
-        // If we have deletions, find the deleted line that corresponds to our suggestion
-        // For mixed changes, we want to position on the deleted line that matches our suggested content
-        let targetDeletedLine = deletedLines[0] // fallback to first
-
-        if (addedLines.length > 0) {
-          // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
-          const linesToSuggest = addedLines.filter(({ content }) => {
-            const deletedContent = new Set(
-              deletedLines.map(({ content }) => content)
-            )
-            return !deletedContent.has(content)
-          })
-
-          if (linesToSuggest.length > 0) {
-            // Try to find a deleted line that corresponds to our suggested content
-            const suggestedContent = linesToSuggest[0].content
-            const matchingDeleted = deletedLines.find(deleted =>
-              // Look for a deleted line with similar content (ignoring whitespace differences)
-              deleted.content.trim() === suggestedContent.trim()
-            )
-            if (matchingDeleted) {
-              targetDeletedLine = matchingDeleted
-            }
-          }
+        // Skip if no suggestion was generated (no actual changes to suggest)
+        if (!suggestionBody) {
+          return []
         }
 
-        startLine = targetDeletedLine.lineBefore
-        endLine = startLine + lineCount - 1
-      } else if (unchangedLines.length > 0) {
-        // Pure additions with context - position on the unchanged line in PR head
-        // The context is included in the suggestion body for clarity
-        startLine = unchangedLines[0].lineBefore
-        endLine = startLine + lineCount - 1
-      } else {
-        // Pure additions without context - use fromFileRange as fallback
-        startLine = fromFileRange.start
-        endLine = startLine + lineCount - 1
-      }
+        const { body, lineCount } = suggestionBody
 
-      // Create appropriate comment based on line count
-      const comment =
-        lineCount === 1
-          ? {
-              path,
-              line: startLine,
-              body: body,
+        // Calculate the correct line position for GitHub review comments
+        // We need line numbers that exist in the PR head (the "before" state)
+        const addedLines = groupChanges.filter(isAddedLine)
+        const deletedLines = groupChanges.filter(isDeletedLine)
+        const unchangedLines = groupChanges.filter(isUnchangedLine)
+
+        let startLine, endLine
+
+        if (deletedLines.length > 0) {
+          // For deletions, we need to find the right line to position on
+          let targetDeletedLine = deletedLines[0] // fallback to first
+
+          if (addedLines.length > 0) {
+            // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
+            const linesToSuggest = addedLines.filter(({ content }) => {
+              const deletedContent = new Set(
+                deletedLines.map(({ content }) => content)
+              )
+              return !deletedContent.has(content)
+            })
+
+            if (linesToSuggest.length > 0) {
+              // Try to find a deleted line that corresponds to our suggested content
+              const suggestedContent = linesToSuggest[0].content
+              const matchingDeleted = deletedLines.find(
+                (deleted) =>
+                  // Look for a deleted line with similar content (ignoring whitespace differences)
+                  deleted.content.trim() === suggestedContent.trim()
+              )
+              if (matchingDeleted) {
+                targetDeletedLine = matchingDeleted
+              }
             }
-          : {
-              path,
-              start_line: startLine,
-              line: endLine,
-              body: body,
-            }
+          }
 
-      // Generate key for the new comment
-      const commentKey = generateCommentKey(comment)
+          startLine = targetDeletedLine.lineBefore
+          endLine = startLine + lineCount - 1
+        } else if (unchangedLines.length > 0) {
+          // Pure additions with context - position on the unchanged line in PR head
+          // The context is included in the suggestion body for clarity
+          startLine = unchangedLines[0].lineBefore
+          endLine = startLine + lineCount - 1
+        } else {
+          // Pure additions without context - use fromFileRange as fallback
+          startLine = fromFileRange.start
+          endLine = startLine + lineCount - 1
+        }
 
-      // Check if the new comment already exists
-      if (existingCommentKeys.has(commentKey)) {
-        return []
-      }
+        // Create appropriate comment based on line count
+        const comment =
+          lineCount === 1
+            ? {
+                path,
+                line: startLine,
+                body: body,
+              }
+            : {
+                path,
+                start_line: startLine,
+                line: endLine,
+                body: body,
+              }
 
-      return [comment]
+        // Generate key for the new comment
+        const commentKey = generateCommentKey(comment)
+
+        // Check if the new comment already exists
+        if (existingCommentKeys.has(commentKey)) {
+          return []
+        }
+
+        return [comment]
+      })
     })
 )
 
