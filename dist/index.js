@@ -54693,19 +54693,44 @@ const generateSuggestionBody = (changes) => {
     return !deletedContent.has(content)
   })
   
-  // Combine new content with unchanged lines in between, sorted by position
-  const allSuggestionContent = [...actuallyNewLines, ...unchangedInRange]
-    .sort((a, b) => {
-      const posA = isAddedLine(a) ? a.lineAfter : a.lineBefore
-      const posB = isAddedLine(b) ? b.lineAfter : b.lineBefore
-      return posA - posB
-    })
+  // Build the suggestion by processing lines in order of their original position
+  const suggestionLines = []
   
-  if (allSuggestionContent.length === 0) {
+  // Process each line in the deleted range
+  for (let lineNum = firstDeletedLine; lineNum <= lastDeletedLine; lineNum++) {
+    // Check if this line was deleted
+    const deletedLine = deletedLines.find(d => d.lineBefore === lineNum)
+    if (deletedLine) {
+      // Find the corresponding replacement content
+      const replacementContent = actuallyNewLines.find(added => {
+        // Simple heuristic: match by content similarity
+        return added.content.trim() === deletedLine.content.trim()
+      })
+      if (replacementContent) {
+        suggestionLines.push(replacementContent.content)
+      }
+      continue
+    }
+    
+    // Check if this line was unchanged
+    const unchangedLine = unchangedInRange.find(u => u.lineBefore === lineNum)
+    if (unchangedLine) {
+      suggestionLines.push(unchangedLine.content)
+    }
+  }
+  
+  // Add any remaining new content that wasn't matched
+  const usedContent = new Set(suggestionLines)
+  actuallyNewLines.forEach(line => {
+    if (!usedContent.has(line.content)) {
+      suggestionLines.push(line.content)
+    }
+  })
+  
+  if (suggestionLines.length === 0) {
     return null
   }
   
-  const suggestionLines = allSuggestionContent.map(({ content }) => content)
   const lineCount = lastDeletedLine - firstDeletedLine + 1
 
   return {
