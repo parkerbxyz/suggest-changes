@@ -54747,24 +54747,24 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
       let startLine, endLine
 
       if (deletedLines.length > 0) {
-        // If we have deletions, use the first deleted line's position by default
-        let targetDeletedLine = deletedLines[0]
-        
-        // Special case: if we have both deletions AND additions (mixed changes)
-        // and multiple deleted lines where some are empty and others have content,
-        // prefer the non-empty line that matches our suggestion content
-        if (deletedLines.length > 1 && addedLines.length > 0) {
+        // If we have deletions, find the deleted line that corresponds to our suggestion
+        // For mixed changes, we want to position on the deleted line that matches our suggested content
+        let targetDeletedLine = deletedLines[0] // fallback to first
+
+        if (addedLines.length > 0) {
+          // Recreate the same logic from generateSuggestionBody to find what we're actually suggesting
           const linesToSuggest = addedLines.filter(({ content }) => {
             const deletedContent = new Set(
               deletedLines.map(({ content }) => content)
             )
             return !deletedContent.has(content)
           })
-          
+
           if (linesToSuggest.length > 0) {
+            // Try to find a deleted line that corresponds to our suggested content
             const suggestedContent = linesToSuggest[0].content
-            const nonEmptyDeleted = deletedLines.filter(deleted => deleted.content.trim().length > 0)
-            const matchingDeleted = nonEmptyDeleted.find(deleted => 
+            const matchingDeleted = deletedLines.find(deleted =>
+              // Look for a deleted line with similar content (ignoring whitespace differences)
               deleted.content.trim() === suggestedContent.trim()
             )
             if (matchingDeleted) {
@@ -54772,7 +54772,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
             }
           }
         }
-        
+
         startLine = targetDeletedLine.lineBefore
         endLine = startLine + lineCount - 1
       } else if (unchangedLines.length > 0) {
