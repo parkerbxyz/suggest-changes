@@ -54618,7 +54618,7 @@ const pullRequestFiles = (
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
 const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
   'git',
-  ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
+  ['diff', '--unified=0', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
   { silent: true }
 )
 
@@ -54679,25 +54679,16 @@ const generateSuggestionBody = (changes) => {
     return null // No actual content changes to suggest
   }
 
-  // For pure additions (no deletions), include context to make the suggestion clearer
-  const isPureAddition = deletedLines.length === 0
-  const contextLine =
-    isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
+  // Build suggestion including unchanged context and new/changed lines
+  const allSuggestionLines = [
+    ...unchangedLines.map(({ content }) => content),
+    ...linesToSuggest.map(({ content }) => content),
+  ]
 
-  // Build the suggestion content
-  const suggestionLines = contextLine
-    ? [contextLine.content, ...linesToSuggest.map(({ content }) => content)]
-    : linesToSuggest.map(({ content }) => content)
-
-  const suggestionBody = suggestionLines.join('\n')
-
-  // For pure additions with context, we want to position the comment on just the context line
-  // The suggestion will show the context + new content, but only affect the context line
-  const lineCount = contextLine ? 1 : linesToSuggest.length
-
+  const suggestionBody = allSuggestionLines.join('\n')
   return {
     body: createSuggestion(suggestionBody),
-    lineCount,
+    lineCount: unchangedLines.length + linesToSuggest.length,
   }
 }
 
@@ -54724,7 +54715,7 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks
     .filter((chunk) => chunk.type === 'Chunk') // Only process regular chunks
     .flatMap(({ fromFileRange, changes }) => {
-      ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line (HEAD): ${fromFileRange.start}`)
+      ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Starting line: ${fromFileRange.start}`)
       ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Number of lines: ${fromFileRange.lines}`)
       ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Changes: ${JSON.stringify(changes)}`)
 
@@ -54738,20 +54729,29 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
 
       const { body, lineCount } = suggestionBody
 
-      // Create appropriate comment based on line count
-      // Use the actual line numbers from AddedLine.lineAfter for correct targeting
+      // Calculate the correct line position for GitHub review comments
+      // We need line numbers that exist in the PR head (the "before" state)
       const addedLines = changes.filter(isAddedLine)
+      const deletedLines = changes.filter(isDeletedLine)
+      const unchangedLines = changes.filter(isUnchangedLine)
 
       let startLine, endLine
-      if (addedLines.length === 0) {
-        // For pure deletions, use the line before the deletion started
-        startLine = fromFileRange.start + 1
-      } else {
-        // Use the actual line number where the first addition appears
-        startLine = addedLines[0].lineAfter
-      }
-      endLine = startLine + lineCount - 1
 
+      if (deletedLines.length > 0) {
+        // If we have deletions, use the first deleted line's position in the PR head
+        startLine = deletedLines[0].lineBefore
+        endLine = startLine + lineCount - 1
+      } else if (unchangedLines.length > 0) {
+        // If we have unchanged lines (pure additions with context), use the unchanged line's position in PR head
+        startLine = unchangedLines[0].lineBefore
+        endLine = startLine + lineCount - 1
+      } else {
+        // Pure additions without context - use fromFileRange as fallback
+        startLine = fromFileRange.start
+        endLine = startLine + lineCount - 1
+      }
+
+      // Create appropriate comment based on line count
       const comment =
         lineCount === 1
           ? {
