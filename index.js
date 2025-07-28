@@ -338,11 +338,14 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
           fromFileRange
         )
 
-        // Create comment
+        // GitHub requires different comment structures:
+        // - Single-line: {path, line, body} (no start_line property)
+        // - Multi-line: {path, start_line, line, body} where start_line < line
+        // We use conditional spread to only add start_line for multi-line comments
         const comment = {
           path,
-          start_line: startLine,
-          line: endLine,
+          ...(lineCount > 1 && { start_line: startLine }),
+          line: lineCount === 1 ? startLine : endLine,
           body,
         }
 
