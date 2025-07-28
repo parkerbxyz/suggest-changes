@@ -54824,6 +54824,7 @@ const eventPayload = JSON.parse(
 )
 
 const pull_number = Number(eventPayload.pull_request.number)
+const commit_id = eventPayload.pull_request.head.sha
 
 const pullRequestFiles = (
   await octokit.pulls.listFiles({ owner, repo, pull_number })
@@ -54886,15 +54887,17 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
           fromFileRange
         )
 
-        // GitHub requires different comment structures:
-        // - Single-line: {path, line, body} (no start_line property)
-        // - Multi-line: {path, start_line, line, body} where start_line < line
-        // We use conditional spread to only add start_line for multi-line comments
+        // GitHub requires different comment structures for the review endpoint:
+        // - Single-line: {path, body, line}
+        // - Multi-line: {path, body, line, start_line, start_side} where start_line < line
+        // We use conditional spread to add start_line and start_side to multi-line comments
+        const isMultiLine = lineCount > 1
         const comment = {
           path,
-          ...(lineCount > 1 && { start_line: startLine }),
-          line: lineCount === 1 ? startLine : endLine,
           body,
+          line: endLine,
+          ...(isMultiLine && { start_line: startLine }),
+          ...(isMultiLine && { start_side: 'RIGHT' }),
         }
 
         // Check if the new comment already exists
@@ -54916,8 +54919,9 @@ if (comments.length > 0) {
     owner,
     repo,
     pull_number,
-    event,
+    commit_id,
     body,
+    event,
     comments,
   })
 }
