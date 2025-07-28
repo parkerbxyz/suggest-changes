@@ -2,8 +2,8 @@
 
 This GitHub Action takes changes from the working directory (using `git diff`) and applies them as suggested changes in a pull request review. This can be useful after running a linter or formatter that automatically makes fixes for you.
 
-- Gives contributors an opportunity to review and accept automated changes
-- Enables semi-automated changes to pull requests without the needing to use a personal access token (PAT) or [GitHub App installation token](https://github.com/actions/create-github-app-token) to trigger workflow runs
+- Gives contributors an opportunity to review and accept automated changes.
+- Enables semi-automated changes to pull requests without the needing to use a personal access token (PAT) or [GitHub App installation token](https://github.com/actions/create-github-app-token) to trigger workflow runs.
 
 > [!NOTE]
 > This GitHub Action only works on [`pull_request`](https://docs.github.com/actions/using-workflows/events-that-trigger-workflows#pull_request) workflow events.
@@ -28,11 +28,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DavidAnson/markdownlint-cli2-action@v15
+
+      - uses: DavidAnson/markdownlint-cli2-action@v20
+        id: markdownlint
         with:
           fix: true
           globs: '**/*.md'
-      - uses: parkerbxyz/suggest-changes@v1
+
+      # Check if markdownlint made any fixes
+      - uses: tj-actions/verify-changed-files@v20
+        id: verify-changed-files
+        if: always() && steps.markdownlint.outcome != 'skipped'
+        with:
+          # Fail if files were changed (this indicates there are linting errors to fix)
+          fail-if-changed: 'true'
+
+      # Suggest fixes if any were made
+      - uses: parkerbxyz/suggest-changes@v2
+        if: failure() && steps.verify-changed-files.outcome == 'failure'
         with:
           comment: 'Please commit the suggested changes from markdownlint.'
           event: 'REQUEST_CHANGES'
