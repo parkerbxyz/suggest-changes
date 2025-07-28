@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.3](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.2...v2.0.3) (2025-07-28)
+
+
+### Bug Fixes
+
+* improve line positioning for review comments ([#78](https://github.com/parkerbxyz/suggest-changes/issues/78)) ([c8ecf14](https://github.com/parkerbxyz/suggest-changes/commit/c8ecf14ac169d70597e47d319204f132ff47b0c9))
+
 ## [2.0.2](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.1...v2.0.2) (2025-07-25)
 
 
