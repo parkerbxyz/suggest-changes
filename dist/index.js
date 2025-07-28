@@ -54666,58 +54666,6 @@ const groupContiguousChanges = (changes) => {
 }
 
 /**
- * @param {AnyLineChange[]} changes
- * @returns {SuggestionBody | null}
- */
-const generateSuggestionBody = (changes) => {
-  const addedLines = changes.filter(isAddedLine)
-  const deletedLines = changes.filter(isDeletedLine)
-  const unchangedLines = changes.filter(isUnchangedLine)
-
-  // Handle pure deletions (only deleted lines)
-  if (addedLines.length === 0 && deletedLines.length > 0) {
-    // For deletions, suggest empty content (which will delete the lines)
-    return {
-      body: createSuggestion(''),
-      lineCount: deletedLines.length,
-    }
-  }
-
-  if (addedLines.length === 0) {
-    return null // No changes to suggest
-  }
-
-  // If we have both added and deleted lines, only suggest lines that are actually different
-  const linesToSuggest = getLinesToSuggest(addedLines, deletedLines)
-
-  if (linesToSuggest.length === 0) {
-    return null // No actual content changes to suggest
-  }
-
-  // For pure additions (no deletions), use the first unchanged line as context
-  // to show reviewers where the new additions should be placed
-  const isPureAddition = deletedLines.length === 0
-  const contextLine =
-    isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
-
-  // Build the suggestion content
-  const suggestionLines = contextLine
-    ? [contextLine.content, ...linesToSuggest.map(({ content }) => content)]
-    : linesToSuggest.map(({ content }) => content)
-
-  const suggestionBody = suggestionLines.join('\n')
-
-  // For pure additions with context, we want to position the comment on just the context line
-  // The suggestion will show the context + new content, but only affect the context line
-  const lineCount = contextLine ? 1 : linesToSuggest.length
-
-  return {
-    body: createSuggestion(suggestionBody),
-    lineCount,
-  }
-}
-
-/**
  * Get lines that are actually different (not duplicates of deleted content)
  * @param {AddedLine[]} addedLines - Array of added lines
  * @param {DeletedLine[]} deletedLines - Array of deleted lines
@@ -54725,14 +54673,12 @@ const generateSuggestionBody = (changes) => {
  */
 const getLinesToSuggest = (addedLines, deletedLines) => {
   if (deletedLines.length === 0) {
-    return addedLines // If only added lines (new content), include all of them
+    return addedLines
   }
 
-  // If we have both added and deleted lines, only suggest lines that are actually different
-  return addedLines.filter(({ content }) => {
-    const deletedContent = new Set(deletedLines.map(({ content }) => content))
-    return !deletedContent.has(content)
-  })
+  const deletedContent = new Set(deletedLines.map(({ content }) => content))
+
+  return addedLines.filter(({ content }) => !deletedContent.has(content))
 }
 
 /**
@@ -54747,6 +54693,55 @@ const findMatchingDeletedLine = (deletedLines, suggestedContent) => {
       (deleted) => deleted.content.trim() === suggestedContent.trim()
     ) || null
   )
+}
+
+/**
+ * @param {AnyLineChange[]} changes
+ * @returns {SuggestionBody | null}
+ */
+const generateSuggestionBody = (changes) => {
+  const addedLines = changes.filter(isAddedLine)
+  const deletedLines = changes.filter(isDeletedLine)
+  const unchangedLines = changes.filter(isUnchangedLine)
+
+  // Handle pure deletions (only deleted lines)
+  if (addedLines.length === 0 && deletedLines.length > 0) {
+    return {
+      body: createSuggestion(''),
+      lineCount: deletedLines.length,
+    }
+  }
+
+  if (addedLines.length === 0) {
+    return null // No changes to suggest
+  }
+
+  const linesToSuggest = getLinesToSuggest(addedLines, deletedLines)
+
+  if (linesToSuggest.length === 0) {
+    return null // No actual content changes to suggest
+  }
+
+  // For pure additions (no deletions), use the first unchanged line as context
+  // to show reviewers where the new additions should be placed
+  const isPureAddition = deletedLines.length === 0
+  const contextLine =
+    isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
+
+  const suggestionLines = contextLine
+    ? [contextLine.content, ...linesToSuggest.map(({ content }) => content)]
+    : linesToSuggest.map(({ content }) => content)
+
+  const suggestionBody = suggestionLines.join('\n')
+
+  // For pure additions with context, we want to position the comment on just the context line
+  // The suggestion will show the context + new content, but only affect the context line
+  const lineCount = contextLine ? 1 : linesToSuggest.length
+
+  return {
+    body: createSuggestion(suggestionBody),
+    lineCount,
+  }
 }
 
 /**
@@ -54833,32 +54828,26 @@ const pullRequestFiles = (
 // Get the diff between the head branch and the base branch (limit to the files in the pull request)
 const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
   'git',
-  // The '--ignore-cr-at-eol' flag ensures that differences in line-ending styles (e.g., CRLF vs. LF)
-  // are ignored when generating the diff. This prevents unnecessary or no-op suggestions caused by
-  // line-ending mismatches, which can occur in cross-platform environments.
+  // The '--ignore-cr-at-eol' flag ignores carriage return differences at line endings
+  // to prevent unnecessary suggestions from cross-platform line ending variations.
   ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
   { silent: true }
 )
 
 ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Diff output: ${diff.stdout}`)
 
-// Create an array of changes from the diff output based on patches
 const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_4__/* ["default"] */ .A)(diff.stdout)
 
-// Get changed files from parsedDiff (changed files have type 'ChangedFile')
 const changedFiles = parsedDiff.files.filter(
   (file) => file.type === 'ChangedFile'
 )
 
-// Fetch existing review comments
 const existingComments = (
   await octokit.pulls.listReviewComments({ owner, repo, pull_number })
 ).data
 
-// Create a Set of existing comment keys for faster lookup
 const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 
-// Create an array of comments with suggested changes for each chunk of each changed file
 const comments = changedFiles.flatMap(({ path, chunks }) =>
   chunks
     .filter((chunk) => chunk.type === 'Chunk') // Only process regular chunks
