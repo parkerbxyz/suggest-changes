@@ -215,12 +215,12 @@ const calculateLinePosition = (groupChanges, lineCount, fromFileRange) => {
   const deletedLines = groupChanges.filter(isDeletedLine)
   const unchangedLines = groupChanges.filter(isUnchangedLine)
 
-  let startLine, endLine
+  let startLine
 
   if (deletedLines.length > 0) {
     // SCENARIO 1: Changes with deletions
     // Position the comment on a deleted line that exists in the PR head
-    let targetDeletedLine = deletedLines[0] // fallback to first
+    let targetDeletedLine = deletedLines[0]
 
     if (addedLines.length > 0) {
       // For mixed changes (deletions + additions), try to find the most relevant deleted line
@@ -240,19 +240,17 @@ const calculateLinePosition = (groupChanges, lineCount, fromFileRange) => {
     }
 
     startLine = targetDeletedLine.lineBefore
-    endLine = startLine + lineCount - 1
   } else if (unchangedLines.length > 0) {
     // SCENARIO 2: Pure additions with context
     // Position on the unchanged line in PR head. The context is included in the suggestion body for clarity.
     startLine = unchangedLines[0].lineBefore
-    endLine = startLine + lineCount - 1
   } else {
     // SCENARIO 3: Pure additions without context
     // Use fromFileRange as fallback positioning
     startLine = fromFileRange.start
-    endLine = startLine + lineCount - 1
   }
 
+  const endLine = startLine + lineCount - 1
   return { startLine, endLine }
 }
 
@@ -340,25 +338,16 @@ const comments = changedFiles.flatMap(({ path, chunks }) =>
           fromFileRange
         )
 
-        // Create appropriate comment based on line count
-        const comment =
-          lineCount === 1
-            ? {
-                path,
-                line: startLine,
-                body: body,
-              }
-            : {
-                path,
-                start_line: startLine,
-                line: endLine,
-                body: body,
-              }
-
-        // Generate key for the new comment
-        const commentKey = generateCommentKey(comment)
+        // Create comment
+        const comment = {
+          path,
+          start_line: startLine,
+          line: endLine,
+          body,
+        }
 
         // Check if the new comment already exists
+        const commentKey = generateCommentKey(comment)
         if (existingCommentKeys.has(commentKey)) {
           return []
         }
