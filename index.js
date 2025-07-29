@@ -28,7 +28,7 @@ import parseGitDiff from 'parse-git-diff'
  * @param {AnyLineChange} change - The change to check
  * @returns {change is AddedLine} True if the change is an AddedLine
  */
-function isAddedLine(change) {
+export function isAddedLine(change) {
   return change?.type === 'AddedLine' && typeof change.lineAfter === 'number'
 }
 
@@ -58,31 +58,94 @@ function isUnchangedLine(change) {
  * @param {string} content
  * @returns {string}
  */
-const createSuggestion = (content) => {
+export const createSuggestion = (content) => {
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
   // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
   return `\`\`\`\`suggestion\n${content}\n\`\`\`\``
 }
 
 /**
- * Group changes into contiguous blocks separated by line gaps.
- * This prevents independent changes (like separate trailing space fixes)
- * from being combined into a single suggestion that would contain duplicate content.
+ * Filter changes by type for easier processing
+ * @param {AnyLineChange[]} changes - Array of changes to filter
+ * @returns {{addedLines: AddedLine[], deletedLines: DeletedLine[], unchangedLines: UnchangedLine[]}}
+ */
+const filterChangesByType = (changes) => ({
+  addedLines: changes.filter(isAddedLine),
+  deletedLines: changes.filter(isDeletedLine),
+  unchangedLines: changes.filter(isUnchangedLine),
+})
+
+/**
+ * Separate standalone deletions from mixed changes within a contiguous group
+ * @param {AnyLineChange[]} group - A contiguous group of changes
+ * @returns {AnyLineChange[][]} Array of separated groups
+ */
+const separateStandaloneDeletions = (group) => {
+  const { addedLines, deletedLines, unchangedLines } =
+    filterChangesByType(group)
+
+  // If no deletions or no additions, keep the group as-is
+  if (deletedLines.length === 0 || addedLines.length === 0) {
+    return [group]
+  }
+
+  // Split deletions into standalone and paired
+  const standaloneDeletes = []
+  const pairedDeletes = []
+
+  deletedLines.forEach((deleted) => {
+    // Non-empty deletions are standalone if there are no additions to pair with
+    if (deleted.content.trim() !== '') {
+      if (addedLines.length === 0) {
+        standaloneDeletes.push(deleted)
+      } else {
+        pairedDeletes.push(deleted)
+      }
+      return
+    }
+
+    // Empty line deletions are standalone unless part of a small header/structure cleanup
+    const isSmallGroupWithSingleAddition =
+      group.length <= 5 && addedLines.length === 1
+    if (!isSmallGroupWithSingleAddition) {
+      standaloneDeletes.push(deleted)
+    } else {
+      pairedDeletes.push(deleted)
+    }
+  })
+
+  // Build result groups
+  const result = [
+    ...standaloneDeletes.map((deleted) => [deleted]),
+    ...(unchangedLines.length > 0 ||
+    pairedDeletes.length > 0 ||
+    addedLines.length > 0
+      ? [[...unchangedLines, ...pairedDeletes, ...addedLines]]
+      : []),
+  ]
+
+  return result.length > 0 ? result : [group]
+}
+
+/**
+ * Group changes into logical suggestion groups.
+ * This creates separate groups for:
+ * 1. Pure deletions (standalone deleted lines with no corresponding additions)
+ * 2. Mixed changes (deletions + additions that belong together)
+ * 3. Pure additions
  *
  * @param {AnyLineChange[]} changes - Array of line changes from git diff
- * @returns {AnyLineChange[][]} Array of contiguous change groups
- * @example
- * // Changes on lines 1, 2, 5, 6 would be grouped as: [[line1, line2], [line5, line6]]
+ * @returns {AnyLineChange[][]} Array of suggestion groups
  */
-const groupContiguousChanges = (changes) => {
+export const groupChangesForSuggestions = (changes) => {
   if (changes.length === 0) return []
 
+  // Group by line proximity (contiguous lines)
   const groups = []
   let currentGroup = []
   let lastLineNumber = null
 
   for (const change of changes) {
-    // Get the line number for positioning (use lineBefore for deletions, lineAfter for additions)
     const lineNumber = isDeletedLine(change)
       ? change.lineBefore
       : isAddedLine(change)
@@ -91,162 +154,89 @@ const groupContiguousChanges = (changes) => {
       ? change.lineBefore
       : null
 
-    if (lineNumber === null) {
-      continue // Skip changes we can't position
+    if (lineNumber === null) continue
+
+    // Start new group if there's a line gap
+    if (lastLineNumber !== null && lineNumber > lastLineNumber + 1) {
+      groups.push(currentGroup)
+      currentGroup = []
     }
 
-    // Start a new group if this is the first change or if there's a gap
-    if (lastLineNumber === null || lineNumber > lastLineNumber + 1) {
-      if (currentGroup.length > 0) {
-        groups.push(currentGroup)
-      }
-      currentGroup = [change]
-    } else {
-      // Add to current group if contiguous
-      currentGroup.push(change)
-    }
-
+    currentGroup.push(change)
     lastLineNumber = lineNumber
   }
 
-  // Don't forget the last group
-  if (currentGroup.length > 0) {
-    groups.push(currentGroup)
-  }
+  if (currentGroup.length > 0) groups.push(currentGroup)
 
-  return groups
+  // Separate standalone deletions from mixed changes within each group
+  return groups.flatMap((group) => separateStandaloneDeletions(group))
 }
 
 /**
- * Get lines that are actually different (not duplicates of deleted content)
- * @param {AddedLine[]} addedLines - Array of added lines
- * @param {DeletedLine[]} deletedLines - Array of deleted lines
- * @returns {AddedLine[]} Lines that represent actual changes
+ * Generate suggestion body and line count for a group of changes
+ * @param {AnyLineChange[]} changes - Group of related changes
+ * @returns {SuggestionBody | null} Suggestion body and line count, or null if no suggestion needed
  */
-const getLinesToSuggest = (addedLines, deletedLines) => {
+export const generateSuggestionBody = (changes) => {
+  const { addedLines, deletedLines, unchangedLines } =
+    filterChangesByType(changes)
+
+  // No additions means no content to suggest, except for pure deletions
+  if (addedLines.length === 0) {
+    return deletedLines.length > 0
+      ? { body: createSuggestion(''), lineCount: deletedLines.length }
+      : null
+  }
+
+  // Pure additions: include context if available
   if (deletedLines.length === 0) {
-    return addedLines
-  }
+    const hasContext = unchangedLines.length > 0
+    const suggestionLines = hasContext
+      ? [unchangedLines[0].content, ...addedLines.map((line) => line.content)]
+      : addedLines.map((line) => line.content)
 
-  const deletedContent = new Set(deletedLines.map(({ content }) => content))
-
-  return addedLines.filter(({ content }) => !deletedContent.has(content))
-}
-
-/**
- * Find a deleted line that matches the suggested content
- * @param {DeletedLine[]} deletedLines - Array of deleted lines
- * @param {string} suggestedContent - Content to match against
- * @returns {DeletedLine | null} Matching deleted line or null
- */
-const findMatchingDeletedLine = (deletedLines, suggestedContent) => {
-  return (
-    deletedLines.find(
-      (deleted) => deleted.content.trim() === suggestedContent.trim()
-    ) || null
-  )
-}
-
-/**
- * @param {AnyLineChange[]} changes
- * @returns {SuggestionBody | null}
- */
-const generateSuggestionBody = (changes) => {
-  const addedLines = changes.filter(isAddedLine)
-  const deletedLines = changes.filter(isDeletedLine)
-  const unchangedLines = changes.filter(isUnchangedLine)
-
-  // Handle pure deletions (only deleted lines)
-  if (addedLines.length === 0 && deletedLines.length > 0) {
     return {
-      body: createSuggestion(''),
-      lineCount: deletedLines.length,
+      body: createSuggestion(suggestionLines.join('\n')),
+      lineCount: hasContext ? 1 : addedLines.length,
     }
   }
 
-  if (addedLines.length === 0) {
-    return null // No changes to suggest
-  }
-
-  const linesToSuggest = getLinesToSuggest(addedLines, deletedLines)
-
-  if (linesToSuggest.length === 0) {
-    return null // No actual content changes to suggest
-  }
-
-  // For pure additions (no deletions), use the first unchanged line as context
-  // to show reviewers where the new additions should be placed
-  const isPureAddition = deletedLines.length === 0
-  const contextLine =
-    isPureAddition && unchangedLines.length > 0 ? unchangedLines[0] : null
-
-  const suggestionLines = contextLine
-    ? [contextLine.content, ...linesToSuggest.map(({ content }) => content)]
-    : linesToSuggest.map(({ content }) => content)
-
-  const suggestionBody = suggestionLines.join('\n')
-
-  // For pure additions with context, we want to position the comment on just the context line
-  // The suggestion will show the context + new content, but only affect the context line
-  const lineCount = contextLine ? 1 : linesToSuggest.length
-
+  // Mixed changes: replace deleted content with added content
+  const suggestionLines = addedLines.map((line) => line.content)
   return {
-    body: createSuggestion(suggestionBody),
-    lineCount,
+    body: createSuggestion(suggestionLines.join('\n')),
+    lineCount: Math.max(deletedLines.length, addedLines.length),
   }
 }
 
 /**
  * Calculate line positioning for GitHub review comments.
- * GitHub requires line numbers that exist in the PR head (the "before" state).
- * We need to handle different scenarios: deletions, additions, and mixed changes.
  * @param {AnyLineChange[]} groupChanges - The changes in this group
  * @param {number} lineCount - Number of lines the suggestion spans
  * @param {{start: number}} fromFileRange - File range information
  * @returns {{startLine: number, endLine: number}} Line positioning
  */
-const calculateLinePosition = (groupChanges, lineCount, fromFileRange) => {
-  const addedLines = groupChanges.filter(isAddedLine)
-  const deletedLines = groupChanges.filter(isDeletedLine)
-  const unchangedLines = groupChanges.filter(isUnchangedLine)
+export const calculateLinePosition = (
+  groupChanges,
+  lineCount,
+  fromFileRange
+) => {
+  const { deletedLines, unchangedLines } = filterChangesByType(groupChanges)
 
   let startLine
 
+  // Try to find the best target line in order of preference
   if (deletedLines.length > 0) {
-    // SCENARIO 1: Changes with deletions
-    // Position the comment on a deleted line that exists in the PR head
-    let targetDeletedLine = deletedLines[0]
-
-    if (addedLines.length > 0) {
-      // For mixed changes (deletions + additions), try to find the most relevant deleted line
-      const linesToSuggest = getLinesToSuggest(addedLines, deletedLines)
-
-      if (linesToSuggest.length > 0) {
-        // Try to find a deleted line that corresponds to our suggested content
-        const suggestedContent = linesToSuggest[0].content
-        const matchingDeleted = findMatchingDeletedLine(
-          deletedLines,
-          suggestedContent
-        )
-        if (matchingDeleted) {
-          targetDeletedLine = matchingDeleted
-        }
-      }
-    }
-
-    startLine = targetDeletedLine.lineBefore
+    startLine = deletedLines[0].lineBefore
   } else if (unchangedLines.length > 0) {
-    // SCENARIO 2: Pure additions with context
-    // Position on the unchanged line in PR head. The context is included in the suggestion body for clarity.
+    // Pure additions with context - position on the context line
     startLine = unchangedLines[0].lineBefore
   } else {
-    // SCENARIO 3: Pure additions without context
-    // Use fromFileRange as fallback positioning
+    // Pure additions without context - use file range
     startLine = fromFileRange.start
   }
 
-  const endLine = startLine + lineCount - 1
-  return { startLine, endLine }
+  return { startLine, endLine: startLine + lineCount - 1 }
 }
 
 /**
@@ -254,127 +244,167 @@ const calculateLinePosition = (groupChanges, lineCount, fromFileRange) => {
  * @param {PostReviewComment | GetReviewComment} comment
  * @returns {string}
  */
-const generateCommentKey = (comment) =>
+export const generateCommentKey = (comment) =>
   `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
     comment.body
   }`
 
-const octokit = new Octokit({
-  userAgent: 'suggest-changes',
-})
-
-const [owner, repo] = String(env.GITHUB_REPOSITORY).split('/')
-
-/** @type {PullRequestEvent} */
-const eventPayload = JSON.parse(
-  readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
-)
-
-const pull_number = Number(eventPayload.pull_request.number)
-const commit_id = eventPayload.pull_request.head.sha
-
-const pullRequestFiles = (
-  await octokit.pulls.listFiles({ owner, repo, pull_number })
-).data.map((file) => file.filename)
-
-// Get the diff between the head branch and the base branch (limit to the files in the pull request)
-const diff = await getExecOutput(
-  'git',
-  // The '--ignore-cr-at-eol' flag ignores carriage return differences at line endings
-  // to prevent unnecessary suggestions from cross-platform line ending variations.
-  ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
-  { silent: true }
-)
-
-debug(`Diff output: ${diff.stdout}`)
-
-const parsedDiff = parseGitDiff(diff.stdout)
-
-const changedFiles = parsedDiff.files.filter(
-  (file) => file.type === 'ChangedFile'
-)
-
-const existingComments = (
-  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
-).data
-
-const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
-
-const comments = changedFiles.flatMap(({ path, chunks }) =>
-  chunks
-    .filter((chunk) => chunk.type === 'Chunk') // Only process regular chunks
-    .flatMap(({ fromFileRange, changes }) => {
-      debug(`Starting line: ${fromFileRange.start}`)
-      debug(`Number of lines: ${fromFileRange.lines}`)
-      debug(`Changes: ${JSON.stringify(changes)}`)
-
-      // Group changes into contiguous blocks
-      const contiguousGroups = groupContiguousChanges(changes)
-
-      // Process each contiguous group separately
-      return contiguousGroups.flatMap((groupChanges) => {
-        // Generate the suggestion body for this group
-        const suggestionBody = generateSuggestionBody(groupChanges)
-
-        // Skip if no suggestion was generated (no actual changes to suggest)
-        if (!suggestionBody) {
-          return []
-        }
-
-        const { body, lineCount } = suggestionBody
-        const { startLine, endLine } = calculateLinePosition(
-          groupChanges,
-          lineCount,
-          fromFileRange
+/**
+ * Generate GitHub review comments from a parsed diff (exported for testing)
+ * @param {ReturnType<typeof parseGitDiff>} parsedDiff - Parsed diff from parse-git-diff
+ * @param {Set<string>} existingCommentKeys - Set of existing comment keys to avoid duplicates
+ * @returns {Array<{path: string, body: string, line: number, start_line?: number, start_side?: string}>} Generated comments
+ */
+export function generateReviewComments(
+  parsedDiff,
+  existingCommentKeys = new Set()
+) {
+  return parsedDiff.files
+    .filter((file) => file.type === 'ChangedFile')
+    .flatMap(({ path, chunks }) =>
+      chunks
+        .filter((chunk) => chunk.type === 'Chunk')
+        .flatMap(({ fromFileRange, changes }) =>
+          processChunkChanges(path, fromFileRange, changes, existingCommentKeys)
         )
+    )
+}
 
-        // GitHub requires different comment structures for the review endpoint:
-        // - Single-line: {path, body, line}
-        // - Multi-line: {path, body, line, start_line, start_side} where start_line < line
-        // We use conditional spread to add start_line and start_side to multi-line comments
-        const isMultiLine = lineCount > 1
-        const comment = {
-          path,
-          body,
-          line: endLine,
-          ...(isMultiLine && { start_line: startLine }),
-          ...(isMultiLine && { start_side: 'RIGHT' }),
-        }
+/**
+ * Process changes within a chunk to generate review comments
+ * @param {string} path - File path
+ * @param {{start: number}} fromFileRange - File range information
+ * @param {AnyLineChange[]} changes - Changes in the chunk
+ * @param {Set<string>} existingCommentKeys - Set of existing comment keys
+ * @returns {Array<{path: string, body: string, line: number, start_line?: number, start_side?: string}>} Generated comments
+ */
+const processChunkChanges = (
+  path,
+  fromFileRange,
+  changes,
+  existingCommentKeys
+) => {
+  const suggestionGroups = groupChangesForSuggestions(changes)
 
-        // Check if the new comment already exists
-        const commentKey = generateCommentKey(comment)
-        if (existingCommentKeys.has(commentKey)) {
-          return []
-        }
+  return suggestionGroups.flatMap((groupChanges) => {
+    const suggestionBody = generateSuggestionBody(groupChanges)
 
-        return [comment]
-      })
+    // Skip if no suggestion was generated
+    if (!suggestionBody) return []
+
+    const { body, lineCount } = suggestionBody
+    const { startLine, endLine } = calculateLinePosition(
+      groupChanges,
+      lineCount,
+      fromFileRange
+    )
+
+    // Create comment with conditional multi-line properties
+    const isMultiLine = lineCount > 1
+    const comment = {
+      path,
+      body,
+      line: endLine,
+      ...(isMultiLine && { start_line: startLine, start_side: 'RIGHT' }),
+    }
+
+    // Skip if comment already exists
+    const commentKey = generateCommentKey(comment)
+    return existingCommentKeys.has(commentKey) ? [] : [comment]
+  })
+}
+
+/**
+ * Main execution function for the GitHub Action
+ * @param {Object} options - Configuration options
+ * @param {Octokit} options.octokit - Octokit instance
+ * @param {string} options.owner - Repository owner
+ * @param {string} options.repo - Repository name
+ * @param {number} options.pull_number - Pull request number
+ * @param {string} options.commit_id - Commit SHA
+ * @param {string} options.diffOutput - Git diff output
+ * @param {ReviewEvent} options.event - Review event type
+ * @param {string} options.body - Review body
+ * @returns {Promise<{comments: Array, reviewCreated: boolean}>} Result of the action
+ */
+export async function run({
+  octokit,
+  owner,
+  repo,
+  pull_number,
+  commit_id,
+  diffOutput,
+  event,
+  body,
+}) {
+  debug(`Diff output: ${diffOutput}`)
+
+  const parsedDiff = parseGitDiff(diffOutput)
+
+  const existingComments = (
+    await octokit.pulls.listReviewComments({ owner, repo, pull_number })
+  ).data
+
+  const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
+
+  const comments = generateReviewComments(parsedDiff, existingCommentKeys)
+
+  // Create a review with the suggested changes if there are any
+  if (comments.length > 0) {
+    await octokit.pulls.createReview({
+      owner,
+      repo,
+      pull_number,
+      commit_id,
+      body,
+      event,
+      comments,
     })
-)
+  }
 
-// Create a review with the suggested changes if there are any
-if (comments.length > 0) {
+  return { comments, reviewCreated: comments.length > 0 }
+}
+
+// Only run main logic when this file is executed directly (not when imported)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const octokit = new Octokit({
+    userAgent: 'suggest-changes',
+  })
+
+  const [owner, repo] = String(env.GITHUB_REPOSITORY).split('/')
+
+  /** @type {PullRequestEvent} */
+  const eventPayload = JSON.parse(
+    readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
+  )
+
+  const pull_number = Number(eventPayload.pull_request.number)
+  const commit_id = eventPayload.pull_request.head.sha
+
+  const pullRequestFiles = (
+    await octokit.pulls.listFiles({ owner, repo, pull_number })
+  ).data.map((file) => file.filename)
+
+  // Get the diff between the head branch and the base branch (limit to the files in the pull request)
+  const diff = await getExecOutput(
+    'git',
+    // The '--ignore-cr-at-eol' flag ignores carriage return differences at line endings
+    // to prevent unnecessary suggestions from cross-platform line ending variations.
+    ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
+    { silent: true }
+  )
+
   const event = /** @type {ReviewEvent} */ (getInput('event').toUpperCase())
   const body = getInput('comment')
-  await octokit.pulls.createReview({
+
+  await run({
+    octokit,
     owner,
     repo,
     pull_number,
     commit_id,
-    body,
+    diffOutput: diff.stdout,
     event,
-    comments,
+    body,
   })
-}
-
-// Export for testing
-export {
-  calculateLinePosition,
-  createSuggestion,
-  findMatchingDeletedLine,
-  generateCommentKey,
-  generateSuggestionBody,
-  getLinesToSuggest,
-  groupContiguousChanges,
-  isAddedLine
 }
