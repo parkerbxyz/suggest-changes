@@ -28,7 +28,7 @@ import parseGitDiff from 'parse-git-diff'
  * @param {AnyLineChange} change - The change to check
  * @returns {change is AddedLine} True if the change is an AddedLine
  */
-export function isAddedLine(change) {
+function isAddedLine(change) {
   return change?.type === 'AddedLine' && typeof change.lineAfter === 'number'
 }
 
@@ -76,78 +76,11 @@ const filterChangesByType = (changes) => ({
 })
 
 /**
- * Separate standalone deletions from mixed changes within a contiguous group.
- *
- * This function intelligently separates deletions that should be standalone suggestions
- * from those that should be grouped with additions as replacement suggestions.
- *
- * Logic:
- * - Non-empty deletions: Always paired with additions when available (content replacement)
- * - Empty line deletions: Usually standalone (cleanup), except for small structural changes
- *
- * @param {AnyLineChange[]} group - A contiguous group of changes from proximity grouping
- * @returns {AnyLineChange[][]} Array of separated suggestion groups
- */
-const separateStandaloneDeletions = (group) => {
-  const { addedLines, deletedLines, unchangedLines } =
-    filterChangesByType(group)
-
-  // Pure groups (only deletions OR only additions) don't need separation
-  if (deletedLines.length === 0 || addedLines.length === 0) {
-    return [group]
-  }
-
-  // Split deletions into standalone and paired based on content and context
-  const standaloneDeletes = []
-  const pairedDeletes = []
-
-  deletedLines.forEach((deleted) => {
-    // Non-empty deletions should be paired with additions for content replacement
-    if (deleted.content.trim() !== '') {
-      if (addedLines.length === 0) {
-        standaloneDeletes.push(deleted)
-      } else {
-        pairedDeletes.push(deleted)
-      }
-      return
-    }
-
-    // Empty line deletions are usually standalone cleanup suggestions,
-    // except when they're part of small structural changes
-    const isSmallGroupWithSingleAddition =
-      group.length <= 5 && addedLines.length === 1
-    if (!isSmallGroupWithSingleAddition) {
-      standaloneDeletes.push(deleted)
-    } else {
-      pairedDeletes.push(deleted)
-    }
-  })
-
-  // Build result: standalone deletions as individual suggestions,
-  // paired content as combined suggestions
-  const result = [
-    ...standaloneDeletes.map((deleted) => [deleted]),
-    ...(unchangedLines.length > 0 ||
-    pairedDeletes.length > 0 ||
-    addedLines.length > 0
-      ? [[...unchangedLines, ...pairedDeletes, ...addedLines]]
-      : []),
-  ]
-
-  return result.length > 0 ? result : [group]
-}
-
-/**
  * Group changes into logical suggestion groups based on line proximity.
  *
- * The algorithm works in two phases:
- * 1. Group changes by line proximity (contiguous or nearly contiguous lines)
- * 2. Separate standalone deletions from mixed content within each group
- *
- * This ensures that:
- * - Related changes (like replacing content) are grouped together
- * - Unrelated changes (like cleanup deletions) remain separate
- * - Multi-line changes get proper start/end positioning
+ * Groups contiguous or nearly contiguous changes together to create logical
+ * suggestions that make sense when reviewing code. Unchanged lines are included
+ * for context but don't affect contiguity calculations.
  *
  * @param {AnyLineChange[]} changes - Array of line changes from git diff
  * @returns {AnyLineChange[][]} Array of suggestion groups
@@ -155,13 +88,13 @@ const separateStandaloneDeletions = (group) => {
 export const groupChangesForSuggestions = (changes) => {
   if (changes.length === 0) return []
 
-  // Phase 1: Group by line proximity using appropriate coordinate systems
+  // Group by line proximity using appropriate coordinate systems
   // - Deletions use lineBefore (original file line numbers)
   // - Additions use lineAfter (new file line numbers)
   // - Unchanged use lineBefore (context positioning)
   const groups = []
   let currentGroup = []
-  let lastLineNumber = null
+  let lastChangedLineNumber = null
 
   for (const change of changes) {
     const lineNumber = isDeletedLine(change)
@@ -174,20 +107,27 @@ export const groupChangesForSuggestions = (changes) => {
 
     if (lineNumber === null) continue
 
-    // Start new group if there's a line gap (non-contiguous changes)
-    if (lastLineNumber !== null && lineNumber > lastLineNumber + 1) {
+    // Start new group if there's a line gap between actual changes (not unchanged lines)
+    if (
+      !isUnchangedLine(change) &&
+      lastChangedLineNumber !== null &&
+      lineNumber > lastChangedLineNumber + 1
+    ) {
       groups.push(currentGroup)
       currentGroup = []
     }
 
     currentGroup.push(change)
-    lastLineNumber = lineNumber
+
+    // Only track line numbers for actual changes (deletions and additions)
+    if (!isUnchangedLine(change)) {
+      lastChangedLineNumber = lineNumber
+    }
   }
 
   if (currentGroup.length > 0) groups.push(currentGroup)
 
-  // Phase 2: Separate standalone deletions from mixed changes within each group
-  return groups.flatMap((group) => separateStandaloneDeletions(group))
+  return groups
 }
 
 /**
@@ -239,20 +179,14 @@ export const calculateLinePosition = (
   lineCount,
   fromFileRange
 ) => {
-  const { deletedLines, unchangedLines } = filterChangesByType(groupChanges)
-
-  let startLine
-
   // Try to find the best target line in order of preference
-  if (deletedLines.length > 0) {
-    startLine = deletedLines[0].lineBefore
-  } else if (unchangedLines.length > 0) {
-    // Pure additions with context - position on the context line
-    startLine = unchangedLines[0].lineBefore
-  } else {
-    // Pure additions without context - use file range
-    startLine = fromFileRange.start
-  }
+  const firstDeletedLine = groupChanges.find(isDeletedLine)
+  const firstUnchangedLine = groupChanges.find(isUnchangedLine)
+
+  const startLine =
+    firstDeletedLine?.lineBefore ?? // Deletions: use original line
+    firstUnchangedLine?.lineBefore ?? // Pure additions with context: position on context line
+    fromFileRange.start // Pure additions without context: use file range
 
   return { startLine, endLine: startLine + lineCount - 1 }
 }
@@ -318,12 +252,11 @@ const processChunkChanges = (
     )
 
     // Create comment with conditional multi-line properties
-    const isMultiLine = lineCount > 1
     const comment = {
       path,
       body,
       line: endLine,
-      ...(isMultiLine && { start_line: startLine, start_side: 'RIGHT' }),
+      ...(lineCount > 1 && { start_line: startLine, start_side: 'RIGHT' }),
     }
 
     // Skip if comment already exists
