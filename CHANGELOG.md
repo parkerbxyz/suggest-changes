@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.5](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.4...v2.0.5) (2025-07-29)
+
+
+### Bug Fixes
+
+* change grouping and deletion separation logic ([#83](https://github.com/parkerbxyz/suggest-changes/issues/83)) ([bd09077](https://github.com/parkerbxyz/suggest-changes/commit/bd090778fb533b461b02565c499b0cd188f21f4b))
+
 ## [2.0.4](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.3...v2.0.4) (2025-07-29)
 
 
