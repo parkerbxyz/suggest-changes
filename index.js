@@ -76,25 +76,33 @@ const filterChangesByType = (changes) => ({
 })
 
 /**
- * Separate standalone deletions from mixed changes within a contiguous group
- * @param {AnyLineChange[]} group - A contiguous group of changes
- * @returns {AnyLineChange[][]} Array of separated groups
+ * Separate standalone deletions from mixed changes within a contiguous group.
+ *
+ * This function intelligently separates deletions that should be standalone suggestions
+ * from those that should be grouped with additions as replacement suggestions.
+ *
+ * Logic:
+ * - Non-empty deletions: Always paired with additions when available (content replacement)
+ * - Empty line deletions: Usually standalone (cleanup), except for small structural changes
+ *
+ * @param {AnyLineChange[]} group - A contiguous group of changes from proximity grouping
+ * @returns {AnyLineChange[][]} Array of separated suggestion groups
  */
 const separateStandaloneDeletions = (group) => {
   const { addedLines, deletedLines, unchangedLines } =
     filterChangesByType(group)
 
-  // If no deletions or no additions, keep the group as-is
+  // Pure groups (only deletions OR only additions) don't need separation
   if (deletedLines.length === 0 || addedLines.length === 0) {
     return [group]
   }
 
-  // Split deletions into standalone and paired
+  // Split deletions into standalone and paired based on content and context
   const standaloneDeletes = []
   const pairedDeletes = []
 
   deletedLines.forEach((deleted) => {
-    // Non-empty deletions are standalone if there are no additions to pair with
+    // Non-empty deletions should be paired with additions for content replacement
     if (deleted.content.trim() !== '') {
       if (addedLines.length === 0) {
         standaloneDeletes.push(deleted)
@@ -104,7 +112,8 @@ const separateStandaloneDeletions = (group) => {
       return
     }
 
-    // Empty line deletions are standalone unless part of a small header/structure cleanup
+    // Empty line deletions are usually standalone cleanup suggestions,
+    // except when they're part of small structural changes
     const isSmallGroupWithSingleAddition =
       group.length <= 5 && addedLines.length === 1
     if (!isSmallGroupWithSingleAddition) {
@@ -114,7 +123,8 @@ const separateStandaloneDeletions = (group) => {
     }
   })
 
-  // Build result groups
+  // Build result: standalone deletions as individual suggestions,
+  // paired content as combined suggestions
   const result = [
     ...standaloneDeletes.map((deleted) => [deleted]),
     ...(unchangedLines.length > 0 ||
@@ -128,11 +138,16 @@ const separateStandaloneDeletions = (group) => {
 }
 
 /**
- * Group changes into logical suggestion groups.
- * This creates separate groups for:
- * 1. Pure deletions (standalone deleted lines with no corresponding additions)
- * 2. Mixed changes (deletions + additions that belong together)
- * 3. Pure additions
+ * Group changes into logical suggestion groups based on line proximity.
+ *
+ * The algorithm works in two phases:
+ * 1. Group changes by line proximity (contiguous or nearly contiguous lines)
+ * 2. Separate standalone deletions from mixed content within each group
+ *
+ * This ensures that:
+ * - Related changes (like replacing content) are grouped together
+ * - Unrelated changes (like cleanup deletions) remain separate
+ * - Multi-line changes get proper start/end positioning
  *
  * @param {AnyLineChange[]} changes - Array of line changes from git diff
  * @returns {AnyLineChange[][]} Array of suggestion groups
@@ -140,7 +155,10 @@ const separateStandaloneDeletions = (group) => {
 export const groupChangesForSuggestions = (changes) => {
   if (changes.length === 0) return []
 
-  // Group by line proximity (contiguous lines)
+  // Phase 1: Group by line proximity using appropriate coordinate systems
+  // - Deletions use lineBefore (original file line numbers)
+  // - Additions use lineAfter (new file line numbers)
+  // - Unchanged use lineBefore (context positioning)
   const groups = []
   let currentGroup = []
   let lastLineNumber = null
@@ -156,7 +174,7 @@ export const groupChangesForSuggestions = (changes) => {
 
     if (lineNumber === null) continue
 
-    // Start new group if there's a line gap
+    // Start new group if there's a line gap (non-contiguous changes)
     if (lastLineNumber !== null && lineNumber > lastLineNumber + 1) {
       groups.push(currentGroup)
       currentGroup = []
@@ -168,7 +186,7 @@ export const groupChangesForSuggestions = (changes) => {
 
   if (currentGroup.length > 0) groups.push(currentGroup)
 
-  // Separate standalone deletions from mixed changes within each group
+  // Phase 2: Separate standalone deletions from mixed changes within each group
   return groups.flatMap((group) => separateStandaloneDeletions(group))
 }
 
