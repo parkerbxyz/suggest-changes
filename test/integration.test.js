@@ -61,7 +61,6 @@ describe('Integration Tests', () => {
   describe('Suggestion Generation', () => {
     // Generate tests for all tool/testcase combinations
     toolDirs
-      .filter(toolDir => toolDir !== 'duplicate-detection') // Skip duplicate-detection directory
       .flatMap((toolDir) =>
         findBeforeAfterPairs(join(fixtureDir, toolDir)).map((pair) => ({
           toolDir,
