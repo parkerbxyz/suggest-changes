@@ -55,6 +55,20 @@ function isUnchangedLine(change) {
 }
 
 /**
+ * Generate git diff output with consistent flags
+ * @param {string[]} gitArgs - Additional git diff arguments
+ * @returns {Promise<string>} The git diff output
+ */
+export async function getGitDiff(gitArgs) {
+  const result = await getExecOutput(
+    'git',
+    ['diff', '--unified=1', '--ignore-cr-at-eol', ...gitArgs],
+    { silent: true, ignoreReturnCode: true }
+  )
+  return result.stdout
+}
+
+/**
  * @param {string} content
  * @returns {string}
  */
@@ -273,7 +287,7 @@ const processChunkChanges = (
  * @param {string} options.repo - Repository name
  * @param {number} options.pull_number - Pull request number
  * @param {string} options.commit_id - Commit SHA
- * @param {string} options.diffOutput - Git diff output
+ * @param {string} options.diff - Git diff output
  * @param {ReviewEvent} options.event - Review event type
  * @param {string} options.body - Review body
  * @returns {Promise<{comments: Array, reviewCreated: boolean}>} Result of the action
@@ -284,13 +298,13 @@ export async function run({
   repo,
   pull_number,
   commit_id,
-  diffOutput,
+  diff,
   event,
   body,
 }) {
-  debug(`Diff output: ${diffOutput}`)
+  debug(`Diff output: ${diff}`)
 
-  const parsedDiff = parseGitDiff(diffOutput)
+  const parsedDiff = parseGitDiff(diff)
 
   const existingComments = (
     await octokit.pulls.listReviewComments({ owner, repo, pull_number })
@@ -337,13 +351,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   ).data.map((file) => file.filename)
 
   // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-  const diff = await getExecOutput(
-    'git',
-    // The '--ignore-cr-at-eol' flag ignores carriage return differences at line endings
-    // to prevent unnecessary suggestions from cross-platform line ending variations.
-    ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
-    { silent: true }
-  )
+  const diff = await getGitDiff(['--', ...pullRequestFiles])
 
   const event = /** @type {ReviewEvent} */ (getInput('event').toUpperCase())
   const body = getInput('comment')
@@ -354,7 +362,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     repo,
     pull_number,
     commit_id,
-    diffOutput: diff.stdout,
+    diff,
     event,
     body,
   })

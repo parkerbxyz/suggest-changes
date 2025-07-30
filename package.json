@@ -1,8 +1,15 @@
 {
   "description": "A GitHub Action for turning working directory changes into pull request review suggestions",
   "type": "module",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
-    "build": "ncc build"
+    "build": "ncc build",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "test:watch": "node --test --watch",
+    "test:update-snapshots": "node --test --test-update-snapshots"
   },
   "dependencies": {
     "@actions/core": "^1.11.1",
