@@ -8,117 +8,362 @@ import { readFileSync } from 'node:fs'
 import { env } from 'node:process'
 import parseGitDiff from 'parse-git-diff'
 
-const octokit = new Octokit({
-  userAgent: 'suggest-changes',
-})
+/** @typedef {import('parse-git-diff').AnyLineChange} AnyLineChange */
+/** @typedef {import('parse-git-diff').AddedLine} AddedLine */
+/** @typedef {import('parse-git-diff').DeletedLine} DeletedLine */
+/** @typedef {import('parse-git-diff').UnchangedLine} UnchangedLine */
+/** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
+/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
+/** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
+/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
 
-const [owner, repo] = String(env.GITHUB_REPOSITORY).split('/')
+/**
+ * @typedef {Object} SuggestionBody
+ * @property {string} body
+ * @property {number} lineCount
+ */
 
-/** @type {import("@octokit/webhooks-types").PullRequestEvent} */
-const eventPayload = JSON.parse(
-  readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
-)
+/**
+ * Type guard to check if a change is an AddedLine
+ * @param {AnyLineChange} change - The change to check
+ * @returns {change is AddedLine} True if the change is an AddedLine
+ */
+function isAddedLine(change) {
+  return change?.type === 'AddedLine' && typeof change.lineAfter === 'number'
+}
 
-const pull_number = Number(eventPayload.pull_request.number)
+/**
+ * Type guard to check if a change is a DeletedLine
+ * @param {AnyLineChange} change - The change to check
+ * @returns {change is DeletedLine} True if the change is a DeletedLine
+ */
+function isDeletedLine(change) {
+  return change?.type === 'DeletedLine' && typeof change.lineBefore === 'number'
+}
 
-const pullRequestFiles = (
-  await octokit.pulls.listFiles({ owner, repo, pull_number })
-).data.map((file) => file.filename)
+/**
+ * Type guard to check if a change is an UnchangedLine
+ * @param {AnyLineChange} change - The change to check
+ * @returns {change is UnchangedLine} True if the change is an UnchangedLine
+ */
+function isUnchangedLine(change) {
+  return (
+    change?.type === 'UnchangedLine' &&
+    typeof change.lineBefore === 'number' &&
+    typeof change.lineAfter === 'number'
+  )
+}
 
-// Get the diff between the head branch and the base branch (limit to the files in the pull request)
-const diff = await getExecOutput(
-  'git',
-  ['diff', '--unified=1', '--', ...pullRequestFiles],
-  { silent: true }
-)
+/**
+ * Generate git diff output with consistent flags
+ * @param {string[]} gitArgs - Additional git diff arguments
+ * @returns {Promise<string>} The git diff output
+ */
+export async function getGitDiff(gitArgs) {
+  const result = await getExecOutput(
+    'git',
+    ['diff', '--unified=1', '--ignore-cr-at-eol', ...gitArgs],
+    { silent: true, ignoreReturnCode: true }
+  )
+  return result.stdout
+}
 
-debug(`Diff output: ${diff.stdout}`)
-
-// Create an array of changes from the diff output based on patches
-const parsedDiff = parseGitDiff(diff.stdout)
-
-// Get changed files from parsedDiff (changed files have type 'ChangedFile')
-const changedFiles = parsedDiff.files.filter(
-  (file) => file.type === 'ChangedFile'
-)
-
-const generateSuggestionBody = (changes) => {
-  const suggestionBody = changes
-    .filter(({ type }) => type === 'AddedLine' || type === 'UnchangedLine')
-    .map(({ content }) => content)
-    .join('\n')
+/**
+ * @param {string} content
+ * @returns {string}
+ */
+export const createSuggestion = (content) => {
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
   // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
-  return `\`\`\`\`suggestion\n${suggestionBody}\n\`\`\`\``
+  return `\`\`\`\`suggestion\n${content}\n\`\`\`\``
 }
 
-function createSingleLineComment(path, fromFileRange, changes) {
+/**
+ * Filter changes by type for easier processing
+ * @param {AnyLineChange[]} changes - Array of changes to filter
+ * @returns {{addedLines: AddedLine[], deletedLines: DeletedLine[], unchangedLines: UnchangedLine[]}}
+ */
+const filterChangesByType = (changes) => ({
+  addedLines: changes.filter(isAddedLine),
+  deletedLines: changes.filter(isDeletedLine),
+  unchangedLines: changes.filter(isUnchangedLine),
+})
+
+/**
+ * Group changes into logical suggestion groups based on line proximity.
+ *
+ * Groups contiguous or nearly contiguous changes together to create logical
+ * suggestions that make sense when reviewing code. Unchanged lines are included
+ * for context but don't affect contiguity calculations.
+ *
+ * @param {AnyLineChange[]} changes - Array of line changes from git diff
+ * @returns {AnyLineChange[][]} Array of suggestion groups
+ */
+export const groupChangesForSuggestions = (changes) => {
+  if (changes.length === 0) return []
+
+  // Group by line proximity using appropriate coordinate systems
+  // - Deletions use lineBefore (original file line numbers)
+  // - Additions use lineAfter (new file line numbers)
+  // - Unchanged use lineBefore (context positioning)
+  const groups = []
+  let currentGroup = []
+  let lastChangedLineNumber = null
+
+  for (const change of changes) {
+    const lineNumber = isDeletedLine(change)
+      ? change.lineBefore
+      : isAddedLine(change)
+      ? change.lineAfter
+      : isUnchangedLine(change)
+      ? change.lineBefore
+      : null
+
+    if (lineNumber === null) continue
+
+    // Start new group if there's a line gap between actual changes (not unchanged lines)
+    if (
+      !isUnchangedLine(change) &&
+      lastChangedLineNumber !== null &&
+      lineNumber > lastChangedLineNumber + 1
+    ) {
+      groups.push(currentGroup)
+      currentGroup = []
+    }
+
+    currentGroup.push(change)
+
+    // Only track line numbers for actual changes (deletions and additions)
+    if (!isUnchangedLine(change)) {
+      lastChangedLineNumber = lineNumber
+    }
+  }
+
+  if (currentGroup.length > 0) groups.push(currentGroup)
+
+  return groups
+}
+
+/**
+ * Generate suggestion body and line count for a group of changes
+ * @param {AnyLineChange[]} changes - Group of related changes
+ * @returns {SuggestionBody | null} Suggestion body and line count, or null if no suggestion needed
+ */
+export const generateSuggestionBody = (changes) => {
+  const { addedLines, deletedLines, unchangedLines } =
+    filterChangesByType(changes)
+
+  // No additions means no content to suggest, except for pure deletions
+  if (addedLines.length === 0) {
+    return deletedLines.length > 0
+      ? { body: createSuggestion(''), lineCount: deletedLines.length }
+      : null
+  }
+
+  // Pure additions: include context if available
+  if (deletedLines.length === 0) {
+    const hasContext = unchangedLines.length > 0
+    const suggestionLines = hasContext
+      ? [unchangedLines[0].content, ...addedLines.map((line) => line.content)]
+      : addedLines.map((line) => line.content)
+
+    return {
+      body: createSuggestion(suggestionLines.join('\n')),
+      lineCount: hasContext ? 1 : addedLines.length,
+    }
+  }
+
+  // Mixed changes: replace deleted content with added content
+  const suggestionLines = addedLines.map((line) => line.content)
   return {
-    path,
-    line: fromFileRange.start,
-    body: generateSuggestionBody(changes),
+    body: createSuggestion(suggestionLines.join('\n')),
+    lineCount: Math.max(deletedLines.length, addedLines.length),
   }
 }
 
-function createMultiLineComment(path, fromFileRange, changes) {
-  return {
-    path,
-    start_line: fromFileRange.start,
-    // The last line of the chunk is the start line plus the number of lines in the chunk
-    // minus 1 to account for the start line being included in fromFileRange.lines
-    line: fromFileRange.start + fromFileRange.lines - 1,
-    start_side: 'RIGHT',
-    side: 'RIGHT',
-    body: generateSuggestionBody(changes),
-  }
+/**
+ * Calculate line positioning for GitHub review comments.
+ * @param {AnyLineChange[]} groupChanges - The changes in this group
+ * @param {number} lineCount - Number of lines the suggestion spans
+ * @param {{start: number}} fromFileRange - File range information
+ * @returns {{startLine: number, endLine: number}} Line positioning
+ */
+export const calculateLinePosition = (
+  groupChanges,
+  lineCount,
+  fromFileRange
+) => {
+  // Try to find the best target line in order of preference
+  const firstDeletedLine = groupChanges.find(isDeletedLine)
+  const firstUnchangedLine = groupChanges.find(isUnchangedLine)
+
+  const startLine =
+    firstDeletedLine?.lineBefore ?? // Deletions: use original line
+    firstUnchangedLine?.lineBefore ?? // Pure additions with context: position on context line
+    fromFileRange.start // Pure additions without context: use file range
+
+  return { startLine, endLine: startLine + lineCount - 1 }
 }
 
-// Fetch existing review comments
-const existingComments = (
-  await octokit.pulls.listReviewComments({ owner, repo, pull_number })
-).data
-
-// Function to generate a unique key for a comment
-const generateCommentKey = (comment) =>
+/**
+ * Function to generate a unique key for a comment
+ * @param {PostReviewComment | GetReviewComment} comment
+ * @returns {string}
+ */
+export const generateCommentKey = (comment) =>
   `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
     comment.body
   }`
 
-// Create a Set of existing comment keys for faster lookup
-const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
+/**
+ * Generate GitHub review comments from a parsed diff (exported for testing)
+ * @param {ReturnType<typeof parseGitDiff>} parsedDiff - Parsed diff from parse-git-diff
+ * @param {Set<string>} existingCommentKeys - Set of existing comment keys to avoid duplicates
+ * @returns {Array<{path: string, body: string, line: number, start_line?: number, start_side?: string}>} Generated comments
+ */
+export function generateReviewComments(
+  parsedDiff,
+  existingCommentKeys = new Set()
+) {
+  return parsedDiff.files
+    .filter((file) => file.type === 'ChangedFile')
+    .flatMap(({ path, chunks }) =>
+      chunks
+        .filter((chunk) => chunk.type === 'Chunk')
+        .flatMap(({ fromFileRange, changes }) =>
+          processChunkChanges(path, fromFileRange, changes, existingCommentKeys)
+        )
+    )
+}
 
-// Create an array of comments with suggested changes for each chunk of each changed file
-const comments = changedFiles.flatMap(({ path, chunks }) =>
-  chunks.flatMap(({ fromFileRange, changes }) => {
-    debug(`Starting line: ${fromFileRange.start}`)
-    debug(`Number of lines: ${fromFileRange.lines}`)
-    debug(`Changes: ${JSON.stringify(changes)}`)
+/**
+ * Process changes within a chunk to generate review comments
+ * @param {string} path - File path
+ * @param {{start: number}} fromFileRange - File range information
+ * @param {AnyLineChange[]} changes - Changes in the chunk
+ * @param {Set<string>} existingCommentKeys - Set of existing comment keys
+ * @returns {Array<{path: string, body: string, line: number, start_line?: number, start_side?: string}>} Generated comments
+ */
+const processChunkChanges = (
+  path,
+  fromFileRange,
+  changes,
+  existingCommentKeys
+) => {
+  const suggestionGroups = groupChangesForSuggestions(changes)
 
-    const comment =
-      fromFileRange.lines <= 1
-        ? createSingleLineComment(path, fromFileRange, changes)
-        : createMultiLineComment(path, fromFileRange, changes)
+  return suggestionGroups.flatMap((groupChanges) => {
+    const suggestionBody = generateSuggestionBody(groupChanges)
 
-    // Generate key for the new comment
-    const commentKey = generateCommentKey(comment)
+    // Skip if no suggestion was generated
+    if (!suggestionBody) return []
 
-    // Check if the new comment already exists
-    if (existingCommentKeys.has(commentKey)) {
-      return []
+    const { body, lineCount } = suggestionBody
+    const { startLine, endLine } = calculateLinePosition(
+      groupChanges,
+      lineCount,
+      fromFileRange
+    )
+
+    // Create comment with conditional multi-line properties
+    const comment = {
+      path,
+      body,
+      line: endLine,
+      ...(lineCount > 1 && { start_line: startLine, start_side: 'RIGHT' }),
     }
 
-    return [comment]
+    // Skip if comment already exists
+    const commentKey = generateCommentKey(comment)
+    return existingCommentKeys.has(commentKey) ? [] : [comment]
   })
-)
+}
 
-// Create a review with the suggested changes if there are any
-if (comments.length > 0) {
-  await octokit.pulls.createReview({
+/**
+ * Main execution function for the GitHub Action
+ * @param {Object} options - Configuration options
+ * @param {Octokit} options.octokit - Octokit instance
+ * @param {string} options.owner - Repository owner
+ * @param {string} options.repo - Repository name
+ * @param {number} options.pull_number - Pull request number
+ * @param {string} options.commit_id - Commit SHA
+ * @param {string} options.diff - Git diff output
+ * @param {ReviewEvent} options.event - Review event type
+ * @param {string} options.body - Review body
+ * @returns {Promise<{comments: Array, reviewCreated: boolean}>} Result of the action
+ */
+export async function run({
+  octokit,
+  owner,
+  repo,
+  pull_number,
+  commit_id,
+  diff,
+  event,
+  body,
+}) {
+  debug(`Diff output: ${diff}`)
+
+  const parsedDiff = parseGitDiff(diff)
+
+  const existingComments = (
+    await octokit.pulls.listReviewComments({ owner, repo, pull_number })
+  ).data
+
+  const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
+
+  const comments = generateReviewComments(parsedDiff, existingCommentKeys)
+
+  // Create a review with the suggested changes if there are any
+  if (comments.length > 0) {
+    await octokit.pulls.createReview({
+      owner,
+      repo,
+      pull_number,
+      commit_id,
+      body,
+      event,
+      comments,
+    })
+  }
+
+  return { comments, reviewCreated: comments.length > 0 }
+}
+
+// Only run main logic when this file is executed directly (not when imported)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const octokit = new Octokit({
+    userAgent: 'suggest-changes',
+  })
+
+  const [owner, repo] = String(env.GITHUB_REPOSITORY).split('/')
+
+  /** @type {PullRequestEvent} */
+  const eventPayload = JSON.parse(
+    readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
+  )
+
+  const pull_number = Number(eventPayload.pull_request.number)
+  const commit_id = eventPayload.pull_request.head.sha
+
+  const pullRequestFiles = (
+    await octokit.pulls.listFiles({ owner, repo, pull_number })
+  ).data.map((file) => file.filename)
+
+  // Get the diff between the head branch and the base branch (limit to the files in the pull request)
+  const diff = await getGitDiff(['--', ...pullRequestFiles])
+
+  const event = /** @type {ReviewEvent} */ (getInput('event').toUpperCase())
+  const body = getInput('comment')
+
+  await run({
+    octokit,
     owner,
     repo,
     pull_number,
-    event: getInput('event').toUpperCase(),
-    body: getInput('comment'),
-    comments,
+    commit_id,
+    diff,
+    event,
+    body,
   })
 }

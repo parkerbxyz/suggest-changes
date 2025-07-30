@@ -1,18 +1,25 @@
 {
   "description": "A GitHub Action for turning working directory changes into pull request review suggestions",
   "type": "module",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
-    "build": "ncc build"
+    "build": "ncc build",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "test:watch": "node --test --watch",
+    "test:update-snapshots": "node --test --test-update-snapshots"
   },
   "dependencies": {
     "@actions/core": "^1.11.1",
     "@actions/exec": "^1.1.1",
-    "@octokit/action": "^7.0.0",
-    "parse-git-diff": "^0.0.17"
+    "@octokit/action": "^8.0.2",
+    "parse-git-diff": "^0.0.19"
   },
   "devDependencies": {
     "@octokit/webhooks-types": "^7.6.1",
-    "@types/node": "^22.10.3",
+    "@types/node": "^24.1.0",
     "@vercel/ncc": "^0.38.3"
   },
   "prettier": {
@@ -24,5 +31,5 @@
       "main"
     ]
   },
-  "version": "2.0.0"
+  "version": "2.0.5"
 }
