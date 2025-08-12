@@ -63,7 +63,7 @@ export async function getGitDiff(gitArgs) {
   const result = await getExecOutput(
     'git',
     ['diff', '--unified=1', '--ignore-cr-at-eol', ...gitArgs],
-    { silent: true, ignoreReturnCode: true }
+    { silent: true, ignoreReturnCode: true },
   )
   return result.stdout
 }
@@ -114,10 +114,10 @@ export const groupChangesForSuggestions = (changes) => {
     const lineNumber = isDeletedLine(change)
       ? change.lineBefore
       : isAddedLine(change)
-      ? change.lineAfter
-      : isUnchangedLine(change)
-      ? change.lineBefore
-      : null
+        ? change.lineAfter
+        : isUnchangedLine(change)
+          ? change.lineBefore
+          : null
 
     if (lineNumber === null) continue
 
@@ -191,7 +191,7 @@ export const generateSuggestionBody = (changes) => {
 export const calculateLinePosition = (
   groupChanges,
   lineCount,
-  fromFileRange
+  fromFileRange,
 ) => {
   // Try to find the best target line in order of preference
   const firstDeletedLine = groupChanges.find(isDeletedLine)
@@ -223,7 +223,7 @@ export const generateCommentKey = (comment) =>
  */
 export function generateReviewComments(
   parsedDiff,
-  existingCommentKeys = new Set()
+  existingCommentKeys = new Set(),
 ) {
   return parsedDiff.files
     .filter((file) => file.type === 'ChangedFile')
@@ -231,8 +231,13 @@ export function generateReviewComments(
       chunks
         .filter((chunk) => chunk.type === 'Chunk')
         .flatMap(({ fromFileRange, changes }) =>
-          processChunkChanges(path, fromFileRange, changes, existingCommentKeys)
-        )
+          processChunkChanges(
+            path,
+            fromFileRange,
+            changes,
+            existingCommentKeys,
+          ),
+        ),
     )
 }
 
@@ -248,7 +253,7 @@ const processChunkChanges = (
   path,
   fromFileRange,
   changes,
-  existingCommentKeys
+  existingCommentKeys,
 ) => {
   const suggestionGroups = groupChangesForSuggestions(changes)
 
@@ -262,7 +267,7 @@ const processChunkChanges = (
     const { startLine, endLine } = calculateLinePosition(
       groupChanges,
       lineCount,
-      fromFileRange
+      fromFileRange,
     )
 
     // Create comment with conditional multi-line properties
@@ -340,7 +345,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   /** @type {PullRequestEvent} */
   const eventPayload = JSON.parse(
-    readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
+    readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8'),
   )
 
   const pull_number = Number(eventPayload.pull_request.number)

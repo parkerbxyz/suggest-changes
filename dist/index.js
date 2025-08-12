@@ -54535,6 +54535,7 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 /* harmony export */   H9: () => (/* binding */ createSuggestion),
 /* harmony export */   MW: () => (/* binding */ generateSuggestionBody),
 /* harmony export */   Qc: () => (/* binding */ calculateLinePosition),
+/* harmony export */   Wz: () => (/* binding */ getGitDiff),
 /* harmony export */   eF: () => (/* binding */ run),
 /* harmony export */   jn: () => (/* binding */ groupChangesForSuggestions),
 /* harmony export */   o5: () => (/* binding */ generateReviewComments)
@@ -54602,6 +54603,20 @@ function isUnchangedLine(change) {
 }
 
 /**
+ * Generate git diff output with consistent flags
+ * @param {string[]} gitArgs - Additional git diff arguments
+ * @returns {Promise<string>} The git diff output
+ */
+async function getGitDiff(gitArgs) {
+  const result = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
+    'git',
+    ['diff', '--unified=1', '--ignore-cr-at-eol', ...gitArgs],
+    { silent: true, ignoreReturnCode: true },
+  )
+  return result.stdout
+}
+
+/**
  * @param {string} content
  * @returns {string}
  */
@@ -54647,10 +54662,10 @@ const groupChangesForSuggestions = (changes) => {
     const lineNumber = isDeletedLine(change)
       ? change.lineBefore
       : isAddedLine(change)
-      ? change.lineAfter
-      : isUnchangedLine(change)
-      ? change.lineBefore
-      : null
+        ? change.lineAfter
+        : isUnchangedLine(change)
+          ? change.lineBefore
+          : null
 
     if (lineNumber === null) continue
 
@@ -54724,7 +54739,7 @@ const generateSuggestionBody = (changes) => {
 const calculateLinePosition = (
   groupChanges,
   lineCount,
-  fromFileRange
+  fromFileRange,
 ) => {
   // Try to find the best target line in order of preference
   const firstDeletedLine = groupChanges.find(isDeletedLine)
@@ -54756,7 +54771,7 @@ const generateCommentKey = (comment) =>
  */
 function generateReviewComments(
   parsedDiff,
-  existingCommentKeys = new Set()
+  existingCommentKeys = new Set(),
 ) {
   return parsedDiff.files
     .filter((file) => file.type === 'ChangedFile')
@@ -54764,8 +54779,13 @@ function generateReviewComments(
       chunks
         .filter((chunk) => chunk.type === 'Chunk')
         .flatMap(({ fromFileRange, changes }) =>
-          processChunkChanges(path, fromFileRange, changes, existingCommentKeys)
-        )
+          processChunkChanges(
+            path,
+            fromFileRange,
+            changes,
+            existingCommentKeys,
+          ),
+        ),
     )
 }
 
@@ -54781,7 +54801,7 @@ const processChunkChanges = (
   path,
   fromFileRange,
   changes,
-  existingCommentKeys
+  existingCommentKeys,
 ) => {
   const suggestionGroups = groupChangesForSuggestions(changes)
 
@@ -54795,7 +54815,7 @@ const processChunkChanges = (
     const { startLine, endLine } = calculateLinePosition(
       groupChanges,
       lineCount,
-      fromFileRange
+      fromFileRange,
     )
 
     // Create comment with conditional multi-line properties
@@ -54820,7 +54840,7 @@ const processChunkChanges = (
  * @param {string} options.repo - Repository name
  * @param {number} options.pull_number - Pull request number
  * @param {string} options.commit_id - Commit SHA
- * @param {string} options.diffOutput - Git diff output
+ * @param {string} options.diff - Git diff output
  * @param {ReviewEvent} options.event - Review event type
  * @param {string} options.body - Review body
  * @returns {Promise<{comments: Array, reviewCreated: boolean}>} Result of the action
@@ -54831,13 +54851,13 @@ async function run({
   repo,
   pull_number,
   commit_id,
-  diffOutput,
+  diff,
   event,
   body,
 }) {
-  ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Diff output: ${diffOutput}`)
+  ;(0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.debug)(`Diff output: ${diff}`)
 
-  const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_4__/* ["default"] */ .A)(diffOutput)
+  const parsedDiff = (0,parse_git_diff__WEBPACK_IMPORTED_MODULE_4__/* ["default"] */ .A)(diff)
 
   const existingComments = (
     await octokit.pulls.listReviewComments({ owner, repo, pull_number })
@@ -54873,7 +54893,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   /** @type {PullRequestEvent} */
   const eventPayload = JSON.parse(
-    (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_EVENT_PATH), 'utf8')
+    (0,node_fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync)(String(node_process__WEBPACK_IMPORTED_MODULE_3__.env.GITHUB_EVENT_PATH), 'utf8'),
   )
 
   const pull_number = Number(eventPayload.pull_request.number)
@@ -54884,13 +54904,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   ).data.map((file) => file.filename)
 
   // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-  const diff = await (0,_actions_exec__WEBPACK_IMPORTED_MODULE_1__.getExecOutput)(
-    'git',
-    // The '--ignore-cr-at-eol' flag ignores carriage return differences at line endings
-    // to prevent unnecessary suggestions from cross-platform line ending variations.
-    ['diff', '--unified=1', '--ignore-cr-at-eol', '--', ...pullRequestFiles],
-    { silent: true }
-  )
+  const diff = await getGitDiff(['--', ...pullRequestFiles])
 
   const event = /** @type {ReviewEvent} */ ((0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('event').toUpperCase())
   const body = (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('comment')
@@ -54901,7 +54915,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     repo,
     pull_number,
     commit_id,
-    diffOutput: diff.stdout,
+    diff,
     event,
     body,
   })
@@ -59242,7 +59256,8 @@ function getFilePath(ctx, input, type) {
 /******/ var __webpack_exports__generateCommentKey = __webpack_exports__.E_;
 /******/ var __webpack_exports__generateReviewComments = __webpack_exports__.o5;
 /******/ var __webpack_exports__generateSuggestionBody = __webpack_exports__.MW;
+/******/ var __webpack_exports__getGitDiff = __webpack_exports__.Wz;
 /******/ var __webpack_exports__groupChangesForSuggestions = __webpack_exports__.jn;
 /******/ var __webpack_exports__run = __webpack_exports__.eF;
-/******/ export { __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__groupChangesForSuggestions as groupChangesForSuggestions, __webpack_exports__run as run };
+/******/ export { __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__groupChangesForSuggestions as groupChangesForSuggestions, __webpack_exports__run as run };
 /******/ 
