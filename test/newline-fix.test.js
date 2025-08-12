@@ -101,4 +101,37 @@ index abc123..def456 100644
     const linesBeingReplaced = (suggestion.line - suggestion.start_line) + 1
     assert.strictEqual(linesBeingReplaced, 2, 'Should replace exactly 2 lines (same as deleted count)')
   })
+
+  test('should handle more deletions than additions (edge case)', () => {
+    // Edge case: 3 deleted lines, 1 added line
+    const diff = `diff --git a/test.php b/test.php
+index abc123..def456 100644
+--- a/test.php
++++ b/test.php
+@@ -1,6 +1,4 @@
+  // unchanged
+-line 1 to delete
+-line 2 to delete  
+-line 3 to delete
++single replacement line
+  // unchanged`
+
+    const parsedDiff = parseGitDiff(diff)
+    const suggestions = generateReviewComments(parsedDiff)
+
+    assert.strictEqual(suggestions.length, 1, 'Should generate exactly one suggestion')
+    
+    const suggestion = suggestions[0]
+    assert.strictEqual(suggestion.line, 4, 'Should target line 4')
+    assert.strictEqual(suggestion.start_line, 2, 'Should start at line 2')
+    assert.strictEqual(
+      suggestion.body, 
+      '````suggestion\nsingle replacement line\n````',
+      'Should suggest the single replacement line'
+    )
+    
+    // Key assertion: should replace 3 lines (deletedLines.length) even though only 1 line is added
+    const linesBeingReplaced = (suggestion.line - suggestion.start_line) + 1
+    assert.strictEqual(linesBeingReplaced, 3, 'Should replace exactly 3 lines based on deleted lines count')
+  })
 })
