@@ -9,7 +9,7 @@
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage",
     "test:watch": "node --test --watch",
-    "test:update-snapshots": "node --test --test-update-snapshots"
+    "test:update-snapshots": "UPDATE_SNAPSHOTS=1 node --test"
   },
   "dependencies": {
     "@actions/core": "^1.11.1",

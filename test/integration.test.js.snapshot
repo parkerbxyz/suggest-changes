@@ -2,63 +2,78 @@ exports[`Integration Tests > Suggestion Generation > markdownlint/default sugges
 [
   {
     "path": "test/fixtures/markdownlint/after.md",
-    "body": "\`\`\`\`suggestion\\n# Headings should not have punctuation\\n\`\`\`\`",
+    "body": "````suggestion\n# Headings should not have punctuation\n````",
     "line": 6,
     "start_line": 1,
     "start_side": "RIGHT"
   },
   {
     "path": "test/fixtures/markdownlint/after.md",
-    "body": "\`\`\`\`suggestion\\n- This line has a trailing space that should be removed.\\n\`\`\`\`",
+    "body": "````suggestion\n- This line has a trailing space that should be removed.\n````",
     "line": 11
   },
   {
     "path": "test/fixtures/markdownlint/after.md",
-    "body": "\`\`\`\`suggestion\\n## Headings should not have a trailing space\\n\`\`\`\`",
+    "body": "````suggestion\n## Headings should not have a trailing space\n````",
     "line": 15,
     "start_line": 14,
     "start_side": "RIGHT"
   },
   {
     "path": "test/fixtures/markdownlint/after.md",
-    "body": "\`\`\`\`suggestion\\n## Headings should be surrounded by blank lines\\n\\n\`\`\`\`",
+    "body": "````suggestion\n## Headings should be surrounded by blank lines\n\n````",
     "line": 19
   },
   {
     "path": "test/fixtures/markdownlint/after.md",
-    "body": "\`\`\`\`suggestion\\n- Item 1\\n- Item 2\\n- Item 3\\n  - Item 3.1\\n\`\`\`\`",
+    "body": "````suggestion\n- Item 1\n- Item 2\n- Item 3\n  - Item 3.1\n````",
     "line": 27,
     "start_line": 24,
     "start_side": "RIGHT"
   },
   {
     "path": "test/fixtures/markdownlint/after.md",
-    "body": "\`\`\`\`suggestion\\n    - Deep nesting with wrong indentation\\n      - Even deeper nesting\\n    - Back to third level\\n- [ ] Task with wrong indentation\\n  - [ ] Sub-task with mixed spaces and tabs\\n  - [ ] Another sub-task with trailing spaces\\n    - [ ] Deep task nesting\\n\`\`\`\`",
+    "body": "````suggestion\n    - Deep nesting with wrong indentation\n      - Even deeper nesting\n    - Back to third level\n- [ ] Task with wrong indentation\n  - [ ] Sub-task with mixed spaces and tabs\n  - [ ] Another sub-task with trailing spaces\n    - [ ] Deep task nesting\n````",
     "line": 36,
     "start_line": 29,
     "start_side": "RIGHT"
   },
   {
     "path": "test/fixtures/markdownlint/after.md",
-    "body": "\`\`\`\`suggestion\\n\\n\`\`\`\`",
+    "body": "````suggestion\n\n````",
     "line": 42
   },
   {
     "path": "test/fixtures/markdownlint/after.md",
-    "body": "\`\`\`\`suggestion\\n}\\n\`\`\`\`",
+    "body": "````suggestion\n}\n````",
     "line": 51
   },
   {
     "path": "test/fixtures/markdownlint/after.md",
-    "body": "\`\`\`\`suggestion\\n\\n\`\`\`\`",
+    "body": "````suggestion\n\n````",
     "line": 57,
     "start_line": 56,
     "start_side": "RIGHT"
   },
   {
     "path": "test/fixtures/markdownlint/after.md",
-    "body": "\`\`\`\`suggestion\\n_Be sure to use consistent syntax for italics._\\n\`\`\`\`",
+    "body": "````suggestion\n_Be sure to use consistent syntax for italics._\n````",
     "line": 60
+  }
+]
+`;
+
+exports[`Integration Tests > Suggestion Generation > codestyle/default suggestions should match snapshot 1`] = `
+[
+  {
+    "path": "test/fixtures/codestyle/after.php",
+    "body": "````suggestion\nclass BannersController extends ApiController\n{\n````",
+    "line": 7
+  },
+  {
+    "path": "test/fixtures/codestyle/after.php",
+    "body": "````suggestion\n}\n````",
+    "line": 23
   }
 ]
 `;
