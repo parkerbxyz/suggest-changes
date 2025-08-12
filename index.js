@@ -177,7 +177,7 @@ export const generateSuggestionBody = (changes) => {
   const suggestionLines = addedLines.map((line) => line.content)
   return {
     body: createSuggestion(suggestionLines.join('\n')),
-    lineCount: Math.max(deletedLines.length, addedLines.length),
+    lineCount: deletedLines.length,
   }
 }
 
