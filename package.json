@@ -2,7 +2,7 @@
   "description": "A GitHub Action for turning working directory changes into pull request review suggestions",
   "type": "module",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=23.4.0"
   },
   "scripts": {
     "build": "ncc build",
