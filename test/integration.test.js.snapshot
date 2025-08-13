@@ -1,3 +1,18 @@
+exports[`Integration Tests > Suggestion Generation > codestyle/default suggestions should match snapshot 1`] = `
+[
+  {
+    "path": "test/fixtures/codestyle/after.php",
+    "body": "\`\`\`\`suggestion\\nclass BannersController extends ApiController\\n{\\n\`\`\`\`",
+    "line": 7
+  },
+  {
+    "path": "test/fixtures/codestyle/after.php",
+    "body": "\`\`\`\`suggestion\\n}\\n\`\`\`\`",
+    "line": 23
+  }
+]
+`;
+
 exports[`Integration Tests > Suggestion Generation > markdownlint/default suggestions should match snapshot 1`] = `
 [
   {
