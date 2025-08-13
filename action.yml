@@ -14,5 +14,5 @@ inputs:
     description: 'The review action you want to perform. The review actions include: APPROVE, REQUEST_CHANGES, or COMMENT.'
     default: 'COMMENT'
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'
