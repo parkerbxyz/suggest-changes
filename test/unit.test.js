@@ -1,11 +1,7 @@
 // @ts-check
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
-import {
-  createSuggestion,
-  generateCommentKey,
-  run
-} from '../index.js'
+import { createSuggestion, generateCommentKey, run } from '../index.js'
 
 describe('Unit Tests', () => {
   describe('generateCommentKey', () => {
@@ -14,20 +10,24 @@ describe('Unit Tests', () => {
         path: 'file.md',
         line: 5,
         start_line: 3,
-        body: 'Fix this'
+        body: 'Fix this',
       }
 
       const comment2 = {
         path: 'file.md',
         line: 5,
         start_line: 3,
-        body: 'Fix that'
+        body: 'Fix that',
       }
 
       const key1 = generateCommentKey(comment1)
       const key2 = generateCommentKey(comment2)
 
-      assert.notStrictEqual(key1, key2, 'Different comments should have different keys')
+      assert.notStrictEqual(
+        key1,
+        key2,
+        'Different comments should have different keys',
+      )
       assert.strictEqual(key1, 'file.md:5:3:Fix this')
       assert.strictEqual(key2, 'file.md:5:3:Fix that')
     })
@@ -35,7 +35,7 @@ describe('Unit Tests', () => {
     test('should handle missing optional fields', () => {
       const comment = {
         path: 'file.md',
-        body: 'Simple comment'
+        body: 'Simple comment',
       }
 
       const key = generateCommentKey(comment)
@@ -47,20 +47,24 @@ describe('Unit Tests', () => {
         path: 'test.md',
         line: 2,
         start_line: 1,
-        body: '````suggestion\n### Level 3 heading\nThis is a sentence.\n````'
+        body: '````suggestion\n### Level 3 heading\nThis is a sentence.\n````',
       }
 
       const comment2 = {
         path: 'test.md',
         line: 2,
         start_line: 1,
-        body: '````suggestion\n### Level 3 heading\nThis is a sentence.\n````'
+        body: '````suggestion\n### Level 3 heading\nThis is a sentence.\n````',
       }
 
       const key1 = generateCommentKey(comment1)
       const key2 = generateCommentKey(comment2)
 
-      assert.strictEqual(key1, key2, 'Identical comments should have the same key')
+      assert.strictEqual(
+        key1,
+        key2,
+        'Identical comments should have the same key',
+      )
     })
   })
 
@@ -82,7 +86,10 @@ describe('Unit Tests', () => {
 
     test('should preserve whitespace and formatting', () => {
       const result = createSuggestion('  Indented line  \n\nWith empty line')
-      assert.strictEqual(result, '````suggestion\n  Indented line  \n\nWith empty line\n````')
+      assert.strictEqual(
+        result,
+        '````suggestion\n  Indented line  \n\nWith empty line\n````',
+      )
     })
   })
 
@@ -90,8 +97,8 @@ describe('Unit Tests', () => {
     test('should return no comments for empty diff', async () => {
       const mockOctokit = {
         pulls: {
-          listReviewComments: async () => ({ data: [] })
-        }
+          listReviewComments: async () => ({ data: [] }),
+        },
       }
 
       const result = await run({
@@ -103,12 +110,12 @@ describe('Unit Tests', () => {
         commit_id: 'abc123',
         diff: '',
         event: 'COMMENT',
-        body: 'Test review'
+        body: 'Test review',
       })
 
       assert.deepStrictEqual(result, {
         comments: [],
-        reviewCreated: false
+        reviewCreated: false,
       })
     })
 
@@ -123,10 +130,9 @@ describe('Unit Tests', () => {
       const mockOctokit = {
         pulls: {
           listReviewComments: async () => ({ data: [] }),
-          createReview: async () => ({ data: { id: 123 } })
-        }
+          createReview: async () => ({ data: { id: 123 } }),
+        },
       }
-
 
       const result = await run({
         // @ts-ignore - Test mock doesn't need full Octokit interface
@@ -137,7 +143,7 @@ describe('Unit Tests', () => {
         commit_id: 'abc123',
         diff,
         event: 'COMMENT',
-        body: 'Test review'
+        body: 'Test review',
       })
 
       assert.strictEqual(result.reviewCreated, true)
