@@ -1,10 +1,11 @@
 <?php
+
 /**
  * BannersController class
  *
  * @since  4.0.0
  */
-class BannersController extends ApiController                                          {
+class BannersController extends ApiController{
     /**
      * The content type of the item.
      *
