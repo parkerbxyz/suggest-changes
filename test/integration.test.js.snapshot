@@ -68,12 +68,12 @@ exports[`Integration Tests > Suggestion Generation > php-cs-fixer/default sugges
   {
     "path": "test/fixtures/php-cs-fixer/after.php",
     "body": "\`\`\`\`suggestion\\nclass BannersController extends ApiController\\n{\\n\`\`\`\`",
-    "line": 7
+    "line": 8
   },
   {
     "path": "test/fixtures/php-cs-fixer/after.php",
     "body": "\`\`\`\`suggestion\\n}\\n\`\`\`\`",
-    "line": 23
+    "line": 24
   }
 ]
 `;
