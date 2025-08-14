@@ -7,6 +7,7 @@ This GitHub Action takes changes from the working directory (using `git diff`) a
 
 > [!NOTE]
 > This GitHub Action only works on [`pull_request`](https://docs.github.com/actions/using-workflows/events-that-trigger-workflows#pull_request) workflow events.
+> It is also limited to only suggesting changes to files that were changed as part of the original pull request.
 
 ## Usage
 
