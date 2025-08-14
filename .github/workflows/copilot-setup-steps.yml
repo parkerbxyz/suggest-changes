@@ -34,3 +34,5 @@ jobs:
         with:
           node-version-file: 'package.json'
           cache: 'npm'
+      - name: Install dependencies
+        run: npm install
