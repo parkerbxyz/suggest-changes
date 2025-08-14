@@ -71,7 +71,13 @@ describe('Integration Tests', () => {
         test(`${toolDir}/${testName} suggestions should match snapshot`, async (t) => {
           const diffContent = await generateDiff(beforeFile, afterFile)
           const parsed = parseGitDiff(diffContent)
-          const suggestions = generateReviewComments(parsed)
+          // For clarity in snapshots we want the path to reference the BEFORE file.
+          // The diff we generate is from before -> after (so parseGitDiff reports the "after" path),
+          // but suggestions conceptually apply to the before state to reach the after state in these fixtures.
+          const suggestions = generateReviewComments(parsed).map((s) => ({
+            ...s,
+            path: beforeFile,
+          }))
           t.assert.snapshot(suggestions)
         })
       })
