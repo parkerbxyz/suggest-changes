@@ -1,18 +1,3 @@
-exports[`Integration Tests > Suggestion Generation > codestyle/default suggestions should match snapshot 1`] = `
-[
-  {
-    "path": "test/fixtures/codestyle/after.php",
-    "body": "\`\`\`\`suggestion\\nclass BannersController extends ApiController\\n{\\n\`\`\`\`",
-    "line": 7
-  },
-  {
-    "path": "test/fixtures/codestyle/after.php",
-    "body": "\`\`\`\`suggestion\\n}\\n\`\`\`\`",
-    "line": 23
-  }
-]
-`;
-
 exports[`Integration Tests > Suggestion Generation > markdownlint/default suggestions should match snapshot 1`] = `
 [
   {
@@ -74,6 +59,21 @@ exports[`Integration Tests > Suggestion Generation > markdownlint/default sugges
     "path": "test/fixtures/markdownlint/after.md",
     "body": "\`\`\`\`suggestion\\n_Be sure to use consistent syntax for italics._\\n\`\`\`\`",
     "line": 60
+  }
+]
+`;
+
+exports[`Integration Tests > Suggestion Generation > php-cs-fixer/default suggestions should match snapshot 1`] = `
+[
+  {
+    "path": "test/fixtures/php-cs-fixer/after.php",
+    "body": "\`\`\`\`suggestion\\nclass BannersController extends ApiController\\n{\\n\`\`\`\`",
+    "line": 7
+  },
+  {
+    "path": "test/fixtures/php-cs-fixer/after.php",
+    "body": "\`\`\`\`suggestion\\n}\\n\`\`\`\`",
+    "line": 23
   }
 ]
 `;
