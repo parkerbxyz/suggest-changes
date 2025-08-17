@@ -1,6 +1,6 @@
 // @ts-check
 
-import { debug, getInput } from '@actions/core'
+import { debug, getInput, setFailed } from '@actions/core'
 import { getExecOutput } from '@actions/exec'
 import { Octokit } from '@octokit/action'
 
@@ -331,7 +331,7 @@ export async function run({
 }
 
 // Only run main logic when this file is executed directly (not when imported)
-if (import.meta.url === `file://${process.argv[1]}`) {
+async function main() {
   const octokit = new Octokit({
     userAgent: 'suggest-changes',
   })
@@ -342,6 +342,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const eventPayload = JSON.parse(
     readFileSync(String(env.GITHUB_EVENT_PATH), 'utf8')
   )
+
+  if (!eventPayload?.pull_request) {
+    const eventName = String(env.GITHUB_EVENT_NAME)
+      throw new Error(
+      [
+        `This workflow was triggered via ${eventName}.`,
+        `The ${eventName} event payload does not include the pull_request data required by this action.`,
+        'Run this action on: pull_request or pull_request_target instead.',
+      ].join('\n')
+    )
+  }
 
   const pull_number = Number(eventPayload.pull_request.number)
   const commit_id = eventPayload.pull_request.head.sha
@@ -366,4 +377,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     event,
     body,
   })
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) =>
+    setFailed(err instanceof Error ? err.message : String(err))
+  )
 }
