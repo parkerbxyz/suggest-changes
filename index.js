@@ -382,26 +382,21 @@ export async function run({
       let anyAdded = false
       for (const c of comments) {
         try {
-          const basePayload = {
+          await octokit.pulls.createReviewComment({
             owner,
             repo,
             pull_number,
+            commit_id,
+            pull_request_review_id: reviewId,
             body: c.body,
             path: c.path,
             line: c.line,
-            commit_id,
-            pull_request_review_id: reviewId,
             side: /** @type {'RIGHT'} */ ('RIGHT'),
-          }
-          if (c.start_line) {
-            await octokit.pulls.createReviewComment({
-              ...basePayload,
+            ...(c.start_line && {
               start_line: c.start_line,
               start_side: /** @type {'RIGHT'} */ ('RIGHT'),
-            })
-          } else {
-            await octokit.pulls.createReviewComment(basePayload)
-          }
+            }),
+          })
           anyAdded = true
         } catch (e2) {
           if (isLineOutsideDiff(e2)) {
