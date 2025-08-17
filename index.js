@@ -352,7 +352,9 @@ export async function run({
   const comments = generateReviewComments(parsedDiff, existingCommentKeys)
 
   // Create a review with the suggested changes if there are any
-  if (comments.length > 0) {
+  if (comments.length === 0) return { comments, reviewCreated: false }
+
+  try {
     await octokit.pulls.createReview({
       owner,
       repo,
@@ -362,9 +364,75 @@ export async function run({
       event,
       comments,
     })
+    return { comments, reviewCreated: true }
+  } catch (err) {
+    if (isLineOutsideDiff(err)) {
+      debug(
+        'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
+      )
+      // Start a pending review (omit event & comments)
+      const pending = await octokit.pulls.createReview({
+        owner,
+        repo,
+        pull_number,
+        commit_id,
+        body,
+      })
+      const reviewId = pending.data.id
+      let anyAdded = false
+      for (const c of comments) {
+        try {
+          const basePayload = {
+            owner,
+            repo,
+            pull_number,
+            body: c.body,
+            path: c.path,
+            line: c.line,
+            commit_id,
+            pull_request_review_id: reviewId,
+            side: /** @type {'RIGHT'} */ ('RIGHT'),
+          }
+          if (c.start_line) {
+            await octokit.pulls.createReviewComment({
+              ...basePayload,
+              start_line: c.start_line,
+              start_side: /** @type {'RIGHT'} */ ('RIGHT'),
+            })
+          } else {
+            await octokit.pulls.createReviewComment(basePayload)
+          }
+          anyAdded = true
+        } catch (e2) {
+          if (isLineOutsideDiff(e2)) {
+            info(
+              `Could not create suggestion (line outside PR diff) for ${
+                c.path
+              }:${formatLineRange(c.start_line, c.line)}`
+            )
+            continue
+          }
+          throw e2
+        }
+      }
+      if (!anyAdded) {
+        info(
+          'No valid comments could be added; pending review will not be submitted.'
+        )
+        return { comments: [], reviewCreated: false }
+      }
+      await octokit.pulls.submitReview({
+        owner,
+        repo,
+        pull_number,
+        review_id: reviewId,
+        body,
+        event: event || 'COMMENT',
+      })
+      return { comments, reviewCreated: true }
+    }
+    throw err
   }
-
-  return { comments, reviewCreated: comments.length > 0 }
 }
 
 // Only run main logic when this file is executed directly (not when imported)
