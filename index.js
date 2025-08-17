@@ -416,8 +416,7 @@ export async function run({
         )
         // Attempt to clean up the orphaned pending review
         try {
-          // @ts-ignore - endpoint exists in Octokit pulls namespace
-            await octokit.pulls.deletePendingReview({
+          await octokit.pulls.deletePendingReview({
             owner,
             repo,
             pull_number,
@@ -492,5 +491,7 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => setFailed(err instanceof Error ? err.message : String(err)))
+  main().catch((err) =>
+    setFailed(err instanceof Error ? err.message : String(err))
+  )
 }
