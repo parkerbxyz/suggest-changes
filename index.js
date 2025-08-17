@@ -79,6 +79,34 @@ export const createSuggestion = (content) => {
 }
 
 /**
+ * Format a line range for logging: "start-end" for multi-line, or "line" for single-line.
+ * @param {number | undefined} startLine - First line (undefined for single-line suggestions)
+ * @param {number} endLine - Last line (or the only line if single-line)
+ */
+function formatLineRange(startLine, endLine) {
+  return typeof startLine === 'number' && startLine !== endLine
+    ? `${startLine}-${endLine}`
+    : String(endLine)
+}
+
+/**
+ * Determine if an error is the 422 "line must be part of the diff" variant.
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isLineOutsideDiff(err) {
+  return (
+    !!err &&
+    typeof err === 'object' &&
+    // @ts-ignore - dynamic access
+    err.status === 422 &&
+    /line must be part of the diff/i.test(
+      String(/** @type {any} */ (err).message || '')
+    )
+  )
+}
+
+/**
  * Filter changes by type for easier processing
  * @param {AnyLineChange[]} changes - Array of changes to filter
  * @returns {{addedLines: AddedLine[], deletedLines: DeletedLine[], unchangedLines: UnchangedLine[]}}
