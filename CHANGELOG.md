@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.6](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.5...v2.0.6) (2025-08-17)
+
+
+### Bug Fixes
+
+* adjust diff handling when codestyle checkers expand lines ([#87](https://github.com/parkerbxyz/suggest-changes/issues/87)) ([68e7b97](https://github.com/parkerbxyz/suggest-changes/commit/68e7b9788007ff0ba17be78dd735a97e9fb5f64b))
+
 ## [2.0.5](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.4...v2.0.5) (2025-07-29)
 
 
