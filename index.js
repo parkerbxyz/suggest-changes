@@ -410,9 +410,21 @@ export async function run({
         }
       }
       if (!anyAdded) {
-        info(
-          'No valid comments could be added; pending review will not be submitted.'
+        debug(
+          'No review comments could be added; pending review will not be submitted.'
         )
+        // Attempt to clean up the orphaned pending review
+        try {
+          // @ts-ignore - endpoint exists in Octokit pulls namespace
+            await octokit.pulls.deletePendingReview({
+            owner,
+            repo,
+            pull_number,
+            review_id: reviewId,
+          })
+        } catch (cleanupErr) {
+          debug(`Failed to delete pending review ${reviewId}: ${cleanupErr}`)
+        }
         return { comments: [], reviewCreated: false }
       }
       await octokit.pulls.submitReview({
