@@ -2,13 +2,15 @@ name: release
 
 on:
   workflow_dispatch:
-  release:
-    types: [released]
+  push:
+    branches: [main]
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
-  release:
-    uses: parkerbxyz/.github/.github/workflows/release.yml@main
-    secrets: inherit
+  release-please:
+    uses: parkerbxyz/.github/.github/workflows/release-please.yml@main
+    with:
+      release-type: 'node'
