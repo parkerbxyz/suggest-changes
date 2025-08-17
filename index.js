@@ -98,11 +98,12 @@ function formatLineRange(startLine, endLine) {
  */
 function isLineOutsideDiff(err) {
   if (!err || typeof err !== 'object') return false
-  const e = /** @type {RequestError} */ (err)
-  return (
-    e.status === 422 &&
-    /line must be part of the diff/i.test(String(e.message || ''))
-  )
+  // Ensure structural properties exist before narrowing
+  if (!('status' in err) || !('message' in err)) return false
+  const status = /** @type {unknown} */ (err.status)
+  if (typeof status !== 'number' || status !== 422) return false
+  const message = /** @type {unknown} */ (err.message)
+  return /line must be part of the diff/i.test(String(message ?? ''))
 }
 
 /**
