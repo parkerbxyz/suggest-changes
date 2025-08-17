@@ -91,19 +91,17 @@ function formatLineRange(startLine, endLine) {
 }
 
 /**
- * Determine if an error is the 422 "line must be part of the diff" variant.
+ * Determine if an error is the specific 422 "line must be part of the diff" variant.
+ * Acts as a type guard so downstream code can rely on .status/.message safely.
  * @param {unknown} err
- * @returns {boolean}
+ * @returns {err is RequestError}
  */
 function isLineOutsideDiff(err) {
+  if (!err || typeof err !== 'object') return false
+  const e = /** @type {RequestError} */ (err)
   return (
-    !!err &&
-    typeof err === 'object' &&
-    // @ts-ignore - dynamic access
-    err.status === 422 &&
-    /line must be part of the diff/i.test(
-      String(/** @type {any} */ (err).message || '')
-    )
+    e.status === 422 &&
+    /line must be part of the diff/i.test(String(e.message || ''))
   )
 }
 
