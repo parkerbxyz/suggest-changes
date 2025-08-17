@@ -14,7 +14,7 @@ import parseGitDiff from 'parse-git-diff'
 /** @typedef {import('parse-git-diff').UnchangedLine} UnchangedLine */
 /** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
 /** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
-/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
+/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']>} ReviewEvent */
 /** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
 /** @typedef {import('@octokit/request-error').RequestError} RequestError */
 
@@ -433,7 +433,7 @@ export async function run({
         pull_number,
         review_id: reviewId,
         body,
-        event: event || 'COMMENT',
+        event,
       })
       return { comments, reviewCreated: true }
     }
