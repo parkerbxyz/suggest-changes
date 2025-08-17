@@ -1,6 +1,6 @@
 // @ts-check
 
-import { debug, info, getInput, setFailed } from '@actions/core'
+import { debug, getInput, info, setFailed } from '@actions/core'
 import { getExecOutput } from '@actions/exec'
 import { Octokit } from '@octokit/action'
 
