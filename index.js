@@ -492,7 +492,5 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) =>
-    setFailed(err instanceof Error ? err.message : String(err))
-  )
+  main().catch((err) => setFailed(err instanceof Error ? err.message : String(err)))
 }
