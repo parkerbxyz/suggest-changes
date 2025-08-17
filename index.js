@@ -382,7 +382,7 @@ async function main() {
 
   if (!eventPayload?.pull_request) {
     const eventName = String(env.GITHUB_EVENT_NAME)
-      throw new Error(
+    throw new Error(
       [
         `This workflow was triggered via ${eventName}.`,
         `The ${eventName} event payload does not include the pull_request data required by this action.`,
@@ -417,7 +417,7 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) =>
+  main().catch((err) => {
     setFailed(err instanceof Error ? err.message : String(err))
-  )
+  })
 }
