@@ -237,6 +237,24 @@ export function generateReviewComments(
 }
 
 /**
+ * Check if calculated line positions are valid within the diff range
+ * @param {number} startLine - Starting line number
+ * @param {number} endLine - Ending line number  
+ * @param {{start: number, lines: number}} fromFileRange - File range information
+ * @returns {boolean} True if the line positions are valid
+ */
+const isValidLinePosition = (startLine, endLine, fromFileRange) => {
+  const rangeStart = fromFileRange.start
+  const rangeEnd = fromFileRange.start + fromFileRange.lines - 1
+  
+  // A comment is valid if:
+  // 1. startLine is within the original file range 
+  // 2. endLine is within the original file range
+  // 3. startLine <= endLine
+  return startLine >= rangeStart && endLine <= rangeEnd && startLine <= endLine
+}
+
+/**
  * Process changes within a chunk to generate review comments
  * @param {string} path - File path
  * @param {{start: number}} fromFileRange - File range information
@@ -271,6 +289,12 @@ const processChunkChanges = (
       body,
       line: endLine,
       ...(lineCount > 1 && { start_line: startLine, start_side: 'RIGHT' }),
+    }
+
+    // Skip if line positions are out of range
+    if (!isValidLinePosition(startLine, endLine, fromFileRange)) {
+      info(`Skipping suggestion for ${comment.path}:${comment.start_line ? `${comment.start_line}-${comment.line}` : comment.line} because line position is out of range`)
+      return []
     }
 
     // Skip if comment already exists
