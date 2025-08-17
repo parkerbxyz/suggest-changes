@@ -1,6 +1,6 @@
 // @ts-check
 
-import { debug, getInput, setFailed } from '@actions/core'
+import { debug, info, getInput, setFailed } from '@actions/core'
 import { getExecOutput } from '@actions/exec'
 import { Octokit } from '@octokit/action'
 
@@ -276,7 +276,7 @@ const processChunkChanges = (
     // Skip if comment already exists
     const commentKey = generateCommentKey(comment)
     if (existingCommentKeys.has(commentKey)) {
-      debug(`Skipping duplicate suggestion for ${comment.path}:${comment.line}${comment.start_line ? `-${comment.start_line}` : ''} to avoid duplicating existing review comment`)
+      info(`Skipping duplicate suggestion for ${comment.path}:${comment.line}${comment.start_line ? `-${comment.start_line}` : ''} to avoid duplicating existing review comment`)
       return []
     }
     return [comment]
