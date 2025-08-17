@@ -12,5 +12,6 @@ permissions:
 jobs:
   release-please:
     uses: parkerbxyz/.github/.github/workflows/release-please.yml@main
+    secrets: inherit
     with:
       release-type: 'node'
