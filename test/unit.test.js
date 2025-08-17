@@ -1,9 +1,11 @@
 // @ts-check
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
+import parseGitDiff from 'parse-git-diff'
 import {
   createSuggestion,
   generateCommentKey,
+  generateReviewComments,
   run
 } from '../index.js'
 
@@ -142,6 +144,32 @@ describe('Unit Tests', () => {
 
       assert.strictEqual(result.reviewCreated, true)
       assert.strictEqual(result.comments.length, 1)
+    })
+  })
+
+  describe('generateReviewComments', () => {
+    test('should log message when skipping duplicate suggestions', () => {
+      const diff = `diff --git a/test.md b/test.md
+--- a/test.md
++++ b/test.md
+@@ -1,1 +1,1 @@
+-old line
++new line`
+
+      const parsedDiff = parseGitDiff(diff)
+
+      // First call should generate a comment
+      const firstResult = generateReviewComments(parsedDiff, new Set())
+      assert.strictEqual(firstResult.length, 1, 'Should generate one comment on first call')
+
+      // Create existing comment keys based on the first result
+      const existingCommentKeys = new Set(firstResult.map(comment => 
+        `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${comment.body}`
+      ))
+
+      // Second call with same diff should skip duplicate and return no comments
+      const secondResult = generateReviewComments(parsedDiff, existingCommentKeys)
+      assert.strictEqual(secondResult.length, 0, 'Should skip duplicate comment on second call')
     })
   })
 })
