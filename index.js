@@ -275,7 +275,11 @@ const processChunkChanges = (
 
     // Skip if comment already exists
     const commentKey = generateCommentKey(comment)
-    return existingCommentKeys.has(commentKey) ? [] : [comment]
+    if (existingCommentKeys.has(commentKey)) {
+      debug(`Skipping duplicate suggestion for ${comment.path}:${comment.line}${comment.start_line ? `-${comment.start_line}` : ''} to avoid duplicating existing review comment`)
+      return []
+    }
+    return [comment]
   })
 }
 
