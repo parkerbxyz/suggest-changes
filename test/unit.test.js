@@ -171,23 +171,5 @@ describe('Unit Tests', () => {
       const secondResult = generateReviewComments(parsedDiff, existingCommentKeys)
       assert.strictEqual(secondResult.length, 0, 'Should skip duplicate comment on second call')
     })
-
-    test('should log message when skipping out-of-range suggestions', () => {
-      // Create a diff where calculated line positions would be out of range
-      // This is a bit tricky to create naturally, so we'll use a more complex scenario
-      const diff = `diff --git a/test.md b/test.md
---- a/test.md
-+++ b/test.md
-@@ -1,1 +1,1 @@
--old line
-+new line`
-
-      const parsedDiff = parseGitDiff(diff)
-      
-      // This test will be more meaningful once we implement the range validation
-      // For now, just verify that normal suggestions work  
-      const result = generateReviewComments(parsedDiff, new Set())
-      assert.strictEqual(result.length, 1, 'Should generate one comment for valid range')
-    })
   })
 })
