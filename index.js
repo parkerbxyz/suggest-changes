@@ -466,12 +466,6 @@ async function createReview({
    */
   async function deletePendingReview(review_id) {
     try {
-      if (typeof octokit.pulls.deletePendingReview !== 'function') {
-        debug(
-          'deletePendingReview method not available on octokit.pulls; skipping cleanup.'
-        )
-        return
-      }
       await octokit.pulls.deletePendingReview({ ...prContext, review_id })
     } catch (err) {
       debug(
