@@ -394,11 +394,11 @@ async function createReview({
   event,
   comments,
 }) {
+  // Shared pull request identification (endpoints needing commit_id add it inline)
+  const prContext = { owner, repo, pull_number }
   try {
     await octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number,
+      ...prContext,
       commit_id,
       body,
       event,
@@ -411,9 +411,7 @@ async function createReview({
       'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
     )
     const pending = await octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number,
+      ...prContext,
       commit_id,
       body,
     })
@@ -422,16 +420,14 @@ async function createReview({
     for (const comment of comments) {
       try {
         await octokit.pulls.createReviewComment({
-          owner,
-          repo,
-          pull_number,
+          ...prContext,
           commit_id,
           pull_request_review_id: reviewId,
           body: comment.body,
           path: comment.path,
           line: comment.line,
           side: /** @type {'RIGHT'} */ ('RIGHT'),
-          ...(comment.start_line && {
+          ...(comment.start_line !== undefined && {
             start_line: comment.start_line,
             start_side: /** @type {'RIGHT'} */ ('RIGHT'),
           }),
@@ -456,15 +452,13 @@ async function createReview({
       try {
         if (typeof octokit.pulls.deletePendingReview === 'function') {
           await octokit.pulls.deletePendingReview({
-            owner,
-            repo,
-            pull_number,
+            ...prContext,
             review_id: reviewId,
           })
         } else if (typeof octokit.request === 'function') {
           await octokit.request(
             'DELETE /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}',
-            { owner, repo, pull_number, review_id: reviewId }
+            { ...prContext, review_id: reviewId }
           )
         }
       } catch (cleanupErr) {
@@ -481,9 +475,7 @@ async function createReview({
       return { comments: [], reviewCreated: false }
     }
     await octokit.pulls.submitReview({
-      owner,
-      repo,
-      pull_number,
+      ...prContext,
       review_id: reviewId,
       body,
       event,
