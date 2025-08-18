@@ -15,6 +15,10 @@ import parseGitDiff from 'parse-git-diff'
 /** @typedef {import('parse-git-diff').UnchangedLine} UnchangedLine */
 /** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
 /** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
+/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data']} CreatedReviewComment */
+/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['response']['data']} CreatedReview */
+/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/comments']['parameters']} CreateReviewCommentParams */
+/** @typedef {Pick<CreateReviewCommentParams,'path'|'body'|'line'> & { start_line?: CreateReviewCommentParams['start_line'] }} ReviewCommentDraft */
 /** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']>} ReviewEvent */
 /** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
 
@@ -246,7 +250,7 @@ export const generateCommentKey = (comment) =>
  * Generate GitHub review comments from a parsed diff (exported for testing)
  * @param {ReturnType<typeof parseGitDiff>} parsedDiff - Parsed diff from parse-git-diff
  * @param {Set<string>} existingCommentKeys - Set of existing comment keys to avoid duplicates
- * @returns {Array<{path: string, body: string, line: number, start_line?: number, start_side?: string}>} Generated comments
+ * @returns {Array<ReviewCommentDraft & { start_side?: string }>} Generated comments
  */
 export function generateReviewComments(
   parsedDiff,
@@ -269,7 +273,7 @@ export function generateReviewComments(
  * @param {{start: number}} fromFileRange - File range information
  * @param {AnyLineChange[]} changes - Changes in the chunk
  * @param {Set<string>} existingCommentKeys - Set of existing comment keys
- * @returns {Array<{path: string, body: string, line: number, start_line?: number, start_side?: string}>} Generated comments
+ * @returns {Array<ReviewCommentDraft & { start_side?: string }>} Generated comments
  */
 const processChunkChanges = (
   path,
@@ -396,7 +400,7 @@ async function createReview({
 }) {
   const prContext = { owner, repo, pull_number }
 
-  /** Attempt to create a review with all comments. Returns true if successful. */
+  /** Attempt to create a review with all comments. Throws on failure. */
   async function createReviewWithComments() {
     await octokit.pulls.createReview({
       ...prContext,
@@ -406,8 +410,11 @@ async function createReview({
       comments,
     })
   }
-  /** Create a pending review and return its ID. */
+
+  /** Create a pending review and return its ID.
+   * @returns {Promise<CreatedReview['id']>} */
   async function createPendingReview() {
+    /** @type {{ data: CreatedReview }} */
     const pending = await octokit.pulls.createReview({
       ...prContext,
       commit_id,
@@ -418,11 +425,15 @@ async function createReview({
 
   /**
    * Attempt to add a single review comment.
-   * Returns 'added' | 'skipped'. Throws for non-salvageable errors.
+   * Returns the created comment object on success, null if skipped due to the
+   * known 422 "line must be part of the diff" error, otherwise throws.
+   * @param {CreatedReview['id']} reviewId
+   * @param {ReviewCommentDraft} comment
+   * @returns {Promise<CreatedReviewComment | null>}
    */
   async function createReviewComment(reviewId, comment) {
     try {
-      await octokit.pulls.createReviewComment({
+      const response = await octokit.pulls.createReviewComment({
         ...prContext,
         commit_id,
         pull_request_review_id: reviewId,
@@ -435,7 +446,7 @@ async function createReview({
           start_side: /** @type {'RIGHT'} */ ('RIGHT'),
         }),
       })
-      return 'added'
+      return response.data
     } catch (err) {
       if (isLineOutsideDiffError(err)) {
         info(
@@ -443,13 +454,16 @@ async function createReview({
             comment.path
           }:${formatLineRange(comment.start_line, comment.line)}`
         )
-        return 'skipped'
+        return null
       }
       throw err
     }
   }
 
-  /** Best-effort delete of a pending review (swallows errors). */
+  /** Delete a pending review.
+   * @param {CreatedReview['id']} review_id
+   * @returns {Promise<void>}
+   */
   async function deletePendingReview(review_id) {
     try {
       if (typeof octokit.pulls.deletePendingReview !== 'function') {
@@ -480,9 +494,9 @@ async function createReview({
     let added = 0
     let skipped = 0
     for (const comment of comments) {
-      const result = await createReviewComment(reviewId, comment)
-      if (result === 'added') added++
-      else if (result === 'skipped') skipped++
+      const created = await createReviewComment(reviewId, comment)
+      if (created) added++
+      else skipped++
     }
     if (added === 0) {
       debug(
