@@ -97,14 +97,15 @@ function formatLineRange(startLine, endLine) {
  * @param {unknown} err
  * @returns {err is RequestError}
  */
-function isLineOutsideDiff(err) {
+function isLineOutsideDiffError(err) {
   if (!err || typeof err !== 'object') return false
-  // Ensure structural properties exist before narrowing
   if (!('status' in err) || !('message' in err)) return false
-  const status = /** @type {unknown} */ (err.status)
-  if (typeof status !== 'number' || status !== 422) return false
-  const message = /** @type {unknown} */ (err.message)
-  return /line must be part of the diff/i.test(String(message ?? ''))
+  const requestError = /** @type {any} */ (err)
+  return (
+    requestError.status === 422 &&
+    typeof requestError.message === 'string' &&
+    /line must be part of the diff/i.test(requestError.message)
+  )
 }
 
 /**
@@ -408,7 +409,7 @@ async function createReview({
     })
     return { comments, reviewCreated: true }
   } catch (err) {
-    if (!isLineOutsideDiff(err)) throw err
+    if (!isLineOutsideDiffError(err)) throw err
     debug(
       'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
     )
@@ -440,7 +441,7 @@ async function createReview({
         })
         anyAdded = true
       } catch (commentErr) {
-        if (isLineOutsideDiff(commentErr)) {
+        if (isLineOutsideDiffError(commentErr)) {
           info(
             `Could not create suggestion (line outside PR diff) for ${
               comment.path
