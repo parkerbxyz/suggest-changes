@@ -3,6 +3,7 @@
 import { debug, getInput, info, setFailed } from '@actions/core'
 import { getExecOutput } from '@actions/exec'
 import { Octokit } from '@octokit/action'
+import { RequestError } from '@octokit/request-error'
 
 import { readFileSync } from 'node:fs'
 import { env } from 'node:process'
@@ -16,7 +17,6 @@ import parseGitDiff from 'parse-git-diff'
 /** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
 /** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']>} ReviewEvent */
 /** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
-/** @typedef {import('@octokit/request-error').RequestError} RequestError */
 
 /**
  * @typedef {Object} SuggestionBody
@@ -92,19 +92,15 @@ function formatLineRange(startLine, endLine) {
 }
 
 /**
- * Determine if an error is the specific 422 "line must be part of the diff" variant.
- * Acts as a type guard so downstream code can rely on .status/.message safely.
- * @param {unknown} err
- * @returns {err is RequestError}
+ * Returns true for the known 422 "line must be part of the diff" validation failure.
+ * Assumes the error is an Octokit RequestError (call sites cast in catch blocks).
+ * @param {RequestError} err
+ * @returns {boolean}
  */
 function isLineOutsideDiffError(err) {
-  if (!err || typeof err !== 'object') return false
-  if (!('status' in err) || !('message' in err)) return false
-  const requestError = /** @type {any} */ (err)
   return (
-    requestError.status === 422 &&
-    typeof requestError.message === 'string' &&
-    /line must be part of the diff/i.test(requestError.message)
+    err.status === 422 &&
+    /line must be part of the diff/i.test(String(err.message))
   )
 }
 
@@ -409,7 +405,7 @@ async function createReview({
     })
     return { comments, reviewCreated: true }
   } catch (err) {
-    if (!isLineOutsideDiffError(err)) throw err
+    if (!(err instanceof RequestError) || !isLineOutsideDiffError(err)) throw err
     debug(
       'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
     )
@@ -441,7 +437,7 @@ async function createReview({
         })
         anyAdded = true
       } catch (commentErr) {
-        if (isLineOutsideDiffError(commentErr)) {
+        if (commentErr instanceof RequestError && isLineOutsideDiffError(commentErr)) {
           info(
             `Could not create suggestion (line outside PR diff) for ${
               comment.path
