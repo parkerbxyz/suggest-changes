@@ -83,6 +83,7 @@ export const createSuggestion = (content) => {
  * Format a line range for logging: "start-end" for multi-line, or "line" for single-line.
  * @param {number | undefined} startLine - First line (undefined for single-line suggestions)
  * @param {number} endLine - Last line (or the only line if single-line)
+ * @returns {string} Formatted line range
  */
 function formatLineRange(startLine, endLine) {
   return typeof startLine === 'number' && startLine !== endLine
