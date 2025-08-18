@@ -347,14 +347,55 @@ export async function run({
   const existingComments = (
     await octokit.pulls.listReviewComments({ owner, repo, pull_number })
   ).data
-
   const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 
   const comments = generateReviewComments(parsedDiff, existingCommentKeys)
+  if (comments.length === 0) {
+    return { comments: [], reviewCreated: false }
+  }
 
-  // Create a review with the suggested changes if there are any
-  if (comments.length === 0) return { comments, reviewCreated: false }
+  return await createReview({
+    octokit,
+    owner,
+    repo,
+    pull_number,
+    commit_id,
+    body,
+    event,
+    comments,
+  })
+}
 
+/**
+ * Unified review creation helper. Assumes comments array is non-empty.
+ * Strategy:
+ * 1. Attempt batch review creation with all comments.
+ * 2. If it fails with the specific 422 "line must be part of the diff" error,
+ *    create a pending review, add each comment individually (skipping only those
+ *    that trigger the same 422), then submit if at least one was added.
+ * 3. If every per-comment add fails, delete the pending review (best-effort) and
+ *    report no review created.
+ * @param {Object} params
+ * @param {Octokit} params.octokit
+ * @param {string} params.owner
+ * @param {string} params.repo
+ * @param {number} params.pull_number
+ * @param {string} params.commit_id
+ * @param {string} params.body
+ * @param {ReviewEvent} params.event
+ * @param {Array} params.comments
+ * @returns {Promise<{comments: Array, reviewCreated: boolean}>}
+ */
+async function createReview({
+  octokit,
+  owner,
+  repo,
+  pull_number,
+  commit_id,
+  body,
+  event,
+  comments,
+}) {
   try {
     await octokit.pulls.createReview({
       owner,
@@ -367,82 +408,93 @@ export async function run({
     })
     return { comments, reviewCreated: true }
   } catch (err) {
-    if (isLineOutsideDiff(err)) {
-      debug(
-        'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
-      )
-      // Start a pending review (omit event & comments)
-      const pending = await octokit.pulls.createReview({
-        owner,
-        repo,
-        pull_number,
-        commit_id,
-        body,
-      })
-      const reviewId = pending.data.id
-      let anyAdded = false
-      for (const c of comments) {
-        try {
-          await octokit.pulls.createReviewComment({
-            owner,
-            repo,
-            pull_number,
-            commit_id,
-            pull_request_review_id: reviewId,
-            body: c.body,
-            path: c.path,
-            line: c.line,
-            side: /** @type {'RIGHT'} */ ('RIGHT'),
-            ...(c.start_line && {
-              start_line: c.start_line,
-              start_side: /** @type {'RIGHT'} */ ('RIGHT'),
-            }),
-          })
-          anyAdded = true
-        } catch (e2) {
-          if (isLineOutsideDiff(e2)) {
-            info(
-              `Could not create suggestion (line outside PR diff) for ${
-                c.path
-              }:${formatLineRange(c.start_line, c.line)}`
-            )
-            continue
-          }
-          throw e2
+    if (!isLineOutsideDiff(err)) throw err
+    debug(
+      'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
+    )
+    const pending = await octokit.pulls.createReview({
+      owner,
+      repo,
+      pull_number,
+      commit_id,
+      body,
+    })
+    const reviewId = pending.data.id
+    let anyAdded = false
+    for (const comment of comments) {
+      try {
+        await octokit.pulls.createReviewComment({
+          owner,
+          repo,
+          pull_number,
+          commit_id,
+          pull_request_review_id: reviewId,
+          body: comment.body,
+          path: comment.path,
+          line: comment.line,
+          side: /** @type {'RIGHT'} */ ('RIGHT'),
+          ...(comment.start_line && {
+            start_line: comment.start_line,
+            start_side: /** @type {'RIGHT'} */ ('RIGHT'),
+          }),
+        })
+        anyAdded = true
+      } catch (commentErr) {
+        if (isLineOutsideDiff(commentErr)) {
+          info(
+            `Could not create suggestion (line outside PR diff) for ${
+              comment.path
+            }:${formatLineRange(comment.start_line, comment.line)}`
+          )
+          continue
         }
+        throw commentErr
       }
-      if (!anyAdded) {
-        debug(
-          'No review comments could be added; pending review will not be submitted.'
-        )
-        // Attempt to clean up the orphaned pending review
-        try {
+    }
+    if (!anyAdded) {
+      debug(
+        'No review comments could be added; pending review will not be submitted.'
+      )
+      try {
+        if (typeof octokit.pulls.deletePendingReview === 'function') {
           await octokit.pulls.deletePendingReview({
             owner,
             repo,
             pull_number,
             review_id: reviewId,
           })
-        } catch (cleanupErr) {
-          debug(`Failed to delete pending review ${reviewId}: ${cleanupErr}`)
+        } else if (typeof octokit.request === 'function') {
+          await octokit.request(
+            'DELETE /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}',
+            { owner, repo, pull_number, review_id: reviewId }
+          )
         }
-        return { comments: [], reviewCreated: false }
+      } catch (cleanupErr) {
+        const cleanupMsg =
+          cleanupErr &&
+          typeof cleanupErr === 'object' &&
+          'message' in cleanupErr
+            ? /** @type {{message?: unknown}} */ (cleanupErr).message || ''
+            : String(cleanupErr)
+        debug(
+          `Failed to delete pending review ${reviewId}: ${String(cleanupMsg)}`
+        )
       }
-      await octokit.pulls.submitReview({
-        owner,
-        repo,
-        pull_number,
-        review_id: reviewId,
-        body,
-        event,
-      })
-      return { comments, reviewCreated: true }
+      return { comments: [], reviewCreated: false }
     }
-    throw err
+    await octokit.pulls.submitReview({
+      owner,
+      repo,
+      pull_number,
+      review_id: reviewId,
+      body,
+      event,
+    })
+    return { comments, reviewCreated: true }
   }
 }
 
-// Only run main logic when this file is executed directly (not when imported)
+// Main entrypoint (only when executed directly)
 async function main() {
   const octokit = new Octokit({
     userAgent: 'suggest-changes',
@@ -479,16 +531,7 @@ async function main() {
   const event = /** @type {ReviewEvent} */ (getInput('event').toUpperCase())
   const body = getInput('comment')
 
-  await run({
-    octokit,
-    owner,
-    repo,
-    pull_number,
-    commit_id,
-    diff,
-    event,
-    body,
-  })
+  await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body })
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
