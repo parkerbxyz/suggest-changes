@@ -93,12 +93,13 @@ function formatLineRange(startLine, endLine) {
 
 /**
  * Returns true for the known 422 "line must be part of the diff" validation failure.
- * Assumes the error is an Octokit RequestError (call sites cast in catch blocks).
- * @param {RequestError} err
- * @returns {boolean}
+ * Strictly requires an Octokit RequestError so unrelated errors are rethrown.
+ * @param {unknown} err
+ * @returns {err is RequestError}
  */
 function isLineOutsideDiffError(err) {
   return (
+    err instanceof RequestError &&
     err.status === 422 &&
     /line must be part of the diff/i.test(String(err.message))
   )
@@ -405,7 +406,7 @@ async function createReview({
     })
     return { comments, reviewCreated: true }
   } catch (err) {
-    if (!(err instanceof RequestError) || !isLineOutsideDiffError(err)) throw err
+    if (!isLineOutsideDiffError(err)) throw err
     debug(
       'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
     )
@@ -437,7 +438,7 @@ async function createReview({
         })
         anyAdded = true
       } catch (commentErr) {
-        if (commentErr instanceof RequestError && isLineOutsideDiffError(commentErr)) {
+        if (isLineOutsideDiffError(commentErr)) {
           info(
             `Could not create suggestion (line outside PR diff) for ${
               comment.path
