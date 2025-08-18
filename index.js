@@ -406,29 +406,6 @@ async function createReview({
       comments,
     })
   }
-
-  /** Best-effort delete of a pending review (swallows errors). */
-  async function deletePendingReview(review_id) {
-    try {
-      if (typeof octokit.pulls.deletePendingReview !== 'function') {
-        debug(
-          'deletePendingReview method not available on octokit.pulls; skipping cleanup.'
-        )
-        return
-      }
-      await octokit.pulls.deletePendingReview({ ...prContext, review_id })
-    } catch (err) {
-      debug(
-        `Failed to delete pending review ${review_id}: ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      )
-    }
-  }
-
-  /** Salvage path: create pending review, add comments individually, submit if any added. */
-  // (Previously a separate salvage() function; inlined for simplicity.)
-
   /** Create a pending review and return its ID. */
   async function createPendingReview() {
     const pending = await octokit.pulls.createReview({
@@ -469,6 +446,25 @@ async function createReview({
         return 'skipped'
       }
       throw err
+    }
+  }
+
+  /** Best-effort delete of a pending review (swallows errors). */
+  async function deletePendingReview(review_id) {
+    try {
+      if (typeof octokit.pulls.deletePendingReview !== 'function') {
+        debug(
+          'deletePendingReview method not available on octokit.pulls; skipping cleanup.'
+        )
+        return
+      }
+      await octokit.pulls.deletePendingReview({ ...prContext, review_id })
+    } catch (err) {
+      debug(
+        `Failed to delete pending review ${review_id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      )
     }
   }
 
