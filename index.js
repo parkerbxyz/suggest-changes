@@ -394,9 +394,10 @@ async function createReview({
   event,
   comments,
 }) {
-  // Shared pull request identification (endpoints needing commit_id add it inline)
   const prContext = { owner, repo, pull_number }
-  try {
+
+  /** Attempt to create a review with all comments. Returns true if successful. */
+  async function createReviewWithComments() {
     await octokit.pulls.createReview({
       ...prContext,
       commit_id,
@@ -404,74 +405,94 @@ async function createReview({
       event,
       comments,
     })
+  }
+
+  /** Best-effort delete of a pending review (swallows errors). */
+  async function deletePendingReview(review_id) {
+    try {
+      if (typeof octokit.pulls.deletePendingReview !== 'function') {
+        debug(
+          'deletePendingReview method not available on octokit.pulls; skipping cleanup.'
+        )
+        return
+      }
+      await octokit.pulls.deletePendingReview({ ...prContext, review_id })
+    } catch (err) {
+      debug(
+        `Failed to delete pending review ${review_id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      )
+    }
+  }
+
+  /** Salvage path: create pending review, add comments individually, submit if any added. */
+  // (Previously a separate salvage() function; inlined for simplicity.)
+
+  /** Create a pending review and return its ID. */
+  async function createPendingReview() {
+    const pending = await octokit.pulls.createReview({
+      ...prContext,
+      commit_id,
+      body,
+    })
+    return pending.data.id
+  }
+
+  /**
+   * Attempt to add a single review comment.
+   * Returns 'added' | 'skipped'. Throws for non-salvageable errors.
+   */
+  async function createReviewComment(reviewId, comment) {
+    try {
+      await octokit.pulls.createReviewComment({
+        ...prContext,
+        commit_id,
+        pull_request_review_id: reviewId,
+        body: comment.body,
+        path: comment.path,
+        line: comment.line,
+        side: /** @type {'RIGHT'} */ ('RIGHT'),
+        ...(comment.start_line !== undefined && {
+          start_line: comment.start_line,
+          start_side: /** @type {'RIGHT'} */ ('RIGHT'),
+        }),
+      })
+      return 'added'
+    } catch (err) {
+      if (isLineOutsideDiffError(err)) {
+        info(
+          `Could not create suggestion (line outside PR diff) for ${
+            comment.path
+          }:${formatLineRange(comment.start_line, comment.line)}`
+        )
+        return 'skipped'
+      }
+      throw err
+    }
+  }
+
+  try {
+    await createReviewWithComments()
     return { comments, reviewCreated: true }
   } catch (err) {
     if (!isLineOutsideDiffError(err)) throw err
     debug(
       'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
     )
-    const pending = await octokit.pulls.createReview({
-      ...prContext,
-      commit_id,
-      body,
-    })
-    const reviewId = pending.data.id
-    let anyAdded = false
+    const reviewId = await createPendingReview()
+    let added = 0
+    let skipped = 0
     for (const comment of comments) {
-      try {
-        await octokit.pulls.createReviewComment({
-          ...prContext,
-          commit_id,
-          pull_request_review_id: reviewId,
-          body: comment.body,
-          path: comment.path,
-          line: comment.line,
-          side: /** @type {'RIGHT'} */ ('RIGHT'),
-          ...(comment.start_line !== undefined && {
-            start_line: comment.start_line,
-            start_side: /** @type {'RIGHT'} */ ('RIGHT'),
-          }),
-        })
-        anyAdded = true
-      } catch (commentErr) {
-        if (isLineOutsideDiffError(commentErr)) {
-          info(
-            `Could not create suggestion (line outside PR diff) for ${
-              comment.path
-            }:${formatLineRange(comment.start_line, comment.line)}`
-          )
-          continue
-        }
-        throw commentErr
-      }
+      const result = await createReviewComment(reviewId, comment)
+      if (result === 'added') added++
+      else if (result === 'skipped') skipped++
     }
-    if (!anyAdded) {
+    if (added === 0) {
       debug(
         'No review comments could be added; pending review will not be submitted.'
       )
-      try {
-        if (typeof octokit.pulls.deletePendingReview === 'function') {
-          await octokit.pulls.deletePendingReview({
-            ...prContext,
-            review_id: reviewId,
-          })
-        } else if (typeof octokit.request === 'function') {
-          await octokit.request(
-            'DELETE /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}',
-            { ...prContext, review_id: reviewId }
-          )
-        }
-      } catch (cleanupErr) {
-        const cleanupMsg =
-          cleanupErr &&
-          typeof cleanupErr === 'object' &&
-          'message' in cleanupErr
-            ? /** @type {{message?: unknown}} */ (cleanupErr).message || ''
-            : String(cleanupErr)
-        debug(
-          `Failed to delete pending review ${reviewId}: ${String(cleanupMsg)}`
-        )
-      }
+      await deletePendingReview(reviewId)
       return { comments: [], reviewCreated: false }
     }
     await octokit.pulls.submitReview({
@@ -480,6 +501,7 @@ async function createReview({
       body,
       event,
     })
+    debug(`Submitted salvage review (added: ${added}, skipped: ${skipped}).`)
     return { comments, reviewCreated: true }
   }
 }
