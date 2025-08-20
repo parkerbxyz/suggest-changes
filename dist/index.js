@@ -59451,46 +59451,7 @@ async function run({
   if (comments.length === 0) {
     return { comments: [], reviewCreated: false }
   }
-
-  return await createReview({
-    octokit,
-    owner,
-    repo,
-    pull_number,
-    commit_id,
-    body,
-    event,
-    comments,
-  })
-}
-
-/**
- * Unified review creation helper (single batch attempt).
- * Attempts batch creation with all prepared comments. On a 422 "line must be part of the diff"
- * simply returns without creating a review.
- * @param {Object} params
- * @param {Octokit} params.octokit
- * @param {string} params.owner
- * @param {string} params.repo
- * @param {number} params.pull_number
- * @param {string} params.commit_id
- * @param {string} params.body
- * @param {ReviewEvent} params.event
- * @param {Array} params.comments original comment objects (line/start_line form)
- * @returns {Promise<{comments: Array, reviewCreated: boolean}>}
- */
-async function createReview({
-  octokit,
-  owner,
-  repo,
-  pull_number,
-  commit_id,
-  body,
-  event,
-  comments,
-}) {
-  const prContext = { owner, repo, pull_number }
-  ;(0,core.debug)(
+  (0,core.debug)(
     `Batch create attempt: ${comments.length} comments commit=${commit_id.slice(
       0,
       7
@@ -59498,7 +59459,9 @@ async function createReview({
   )
   try {
     await octokit.pulls.createReview({
-      ...prContext,
+      owner,
+      repo,
+      pull_number,
       commit_id,
       body,
       event,
