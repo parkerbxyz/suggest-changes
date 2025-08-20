@@ -537,6 +537,45 @@ async function createReview({
     }
   }
 
+  /** Fetch specific line(s) of a file at the PR head commit for debugging anchor failures.
+   * Returns an array of { lineNumber, content } objects or empty array on failure.
+   * @param {string} path
+   * @param {number} start
+   * @param {number} end
+   * @returns {Promise<Array<{lineNumber:number,content:string}>>}
+   */
+  async function fetchFileLines(path, start, end) {
+    if (start > end) return []
+    try {
+      const res = await octokit.repos.getContent({
+        owner,
+        repo,
+        path,
+        ref: commit_id,
+      })
+      // @ts-ignore - octokit type union; ensure it's a file with content
+      if (!res.data || res.data.type !== 'file' || !res.data.content) return []
+      // @ts-ignore
+      const decoded = Buffer.from(res.data.content, res.data.encoding || 'base64').toString('utf8')
+      const lines = decoded.split(/\r?\n/)
+      const slice = []
+      for (let i = start; i <= end; i++) {
+        const idx = i - 1
+        if (idx >= 0 && idx < lines.length) {
+          slice.push({ lineNumber: i, content: lines[idx] })
+        }
+      }
+      return slice
+    } catch (e) {
+      debug(
+        `Failed to fetch file content for debug ${path}:${start}-${end}: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      )
+      return []
+    }
+  }
+
   /**
    * Attempt to add a single review comment.
    * Returns the created comment object on success, null if skipped due to the
@@ -586,6 +625,24 @@ async function createReview({
         return response.data
       } catch (err) {
         if (isLineOutsideDiffError(err)) {
+          // Enrich debug with actual file line content for the failed anchor
+          const start = comment.start_line ?? comment.line
+            ;(async () => {
+              const contextLines = await fetchFileLines(comment.path, start, comment.line)
+              debugVerbose(
+                () =>
+                  `Anchor debug (line-outside-diff) for ${comment.path}:${formatLineRange(
+                    comment.start_line,
+                    comment.line
+                  )} => ${
+                    contextLines.length
+                      ? contextLines
+                          .map((l) => `${l.lineNumber}: ${l.content}`)
+                          .join(' | ')
+                      : 'no file lines fetched'
+                  }`
+              )
+            })()
           info(
             `Could not create suggestion (line outside PR diff) for ${
               comment.path
@@ -601,6 +658,24 @@ async function createReview({
           return null
         }
         if (err instanceof RequestError && err.status === 404) {
+          if (attempt === 1) {
+            // Fetch and log the target line content at first 404 for added clarity
+            const start = comment.start_line ?? comment.line
+            const lines = await fetchFileLines(comment.path, start, comment.line)
+            debugVerbose(
+              () =>
+                `Anchor debug (404) for ${comment.path}:${formatLineRange(
+                  comment.start_line,
+                  comment.line
+                )} => ${
+                  lines.length
+                    ? lines
+                        .map((l) => `${l.lineNumber}: ${l.content}`)
+                        .join(' | ')
+                    : 'no file lines fetched'
+                }`
+            )
+          }
           // Distinguish transient propagation vs stale review disappearance.
             try {
               const { data: reviews } = await /** @type {any} */ (octokit.pulls).listReviews({
