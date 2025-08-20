@@ -59420,54 +59420,29 @@ async function createReview({
     })
   }
 
-  /** Create a fresh pending review (deleting any lingering pending review first if necessary) and return its ID.
-   * @returns {Promise<CreatedReview['id']>} */
-  async function createPendingReview() {
-    const attemptCreate = async () => {
+  /** Ensure a pending review exists (reuse existing or create new) and return its ID.
+   * No deletion is performed to avoid races and 404s. */
+  async function ensurePendingReview() {
+    // First attempt: create directly (fast path)
+    try {
       /** @type {{ data: CreatedReview }} */
-      const pending = await octokit.pulls.createReview({
+      const created = await octokit.pulls.createReview({
         ...prContext,
         commit_id,
         body,
       })
-      return pending.data.id
-    }
-    try {
-      return await attemptCreate()
+      return created.data.id
     } catch (err) {
-      const pendingReview =
-        err instanceof RequestError &&
-        err.status === 422 &&
-        /only have one pending review/i.test(String(err.message))
-      if (!pendingReview) throw err
-      // Locate pending review and delete it, then retry once.
-      try {
-        const existing = await octokit.pulls.listReviews(prContext)
-        const stale = existing.data.find((r) => r.state === 'PENDING')
-        if (!stale) throw err
-        try {
-          await octokit.pulls.deletePendingReview({
-            ...prContext,
-            review_id: stale.id,
-          })
-          ;(0,core.debug)(`Deleted stale pending review ${stale.id}. Retrying creation.`)
-        } catch (delErr) {
-          (0,core.debug)(
-            `Failed to delete stale pending review ${stale.id}: ${
-              delErr instanceof Error ? delErr.message : String(delErr)
-            }`
-          )
-          throw err
-        }
-      } catch (listErr) {
-        (0,core.debug)(
-          `Could not resolve stale pending review after duplicate error: ${
-            listErr instanceof Error ? listErr.message : String(listErr)
-          }`
-        )
-        throw err
+      if (!isDuplicatePendingReviewError(err)) throw err
+      // Duplicate: list and reuse existing pending review
+      const existing = await octokit.pulls.listReviews(prContext)
+      const pending = existing.data.find((r) => r.state === 'PENDING')
+      if (pending) {
+        (0,core.debug)(`Reusing existing pending review ${pending.id} (duplicate 422).`)
+        return pending.id
       }
-      return await attemptCreate()
+      // Fallback: rethrow original duplicate (should be rare if list succeeded but none found)
+      throw err
     }
   }
 
@@ -59538,7 +59513,7 @@ async function createReview({
         ? 'Batch review creation failed (422: one pending review per pull request). Falling back to pending review salvage path.'
         : 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
     )
-    const reviewId = await createPendingReview()
+  const reviewId = await ensurePendingReview()
     let added = 0
     let skipped = 0
     for (const comment of comments) {
