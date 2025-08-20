@@ -59653,6 +59653,21 @@ async function createReview({
           return null
         }
         if (err instanceof RequestError && err.status === 404) {
+          // Log the raw 404 error details (once per attempt) for diagnostics
+          try {
+            const anyErr = /** @type {any} */ (err)
+            const resp = anyErr.response || {}
+            const headers = resp.headers || {}
+            const data = resp.data || {}
+            ;(0,core.debug)(
+              `404 error detail attempt=${attempt} target=${comment.path}:${formatLineRange(
+                comment.start_line,
+                comment.line
+              )} status=${anyErr.status} message=${anyErr.message}$${
+                data && data.message ? ` apiMessage=${data.message}` : ''
+              } requestId=${headers['x-github-request-id'] || 'n/a'}`
+            )
+          } catch {/* ignore structured logging issues */}
           if (attempt === 1) {
             // Fetch and log the target line content at first 404 for added clarity
             const start = comment.start_line ?? comment.line
