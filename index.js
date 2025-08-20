@@ -616,19 +616,25 @@ async function createReview({
         }
         const response = await octokit.request(
           'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments',
-          {
-            ...prContext,
-            review_id: reviewId,
-            commit_id,
-            body: comment.body,
-            path: comment.path,
-            line: comment.line,
-            side: /** @type {'RIGHT'} */ ('RIGHT'),
-            ...(comment.start_line !== undefined && {
-              start_line: comment.start_line,
-              start_side: /** @type {'RIGHT'} */ ('RIGHT'),
-            }),
-          }
+          (() => {
+            const params = {
+              ...prContext,
+              review_id: reviewId,
+              commit_id,
+              body: comment.body,
+              path: comment.path,
+              line: comment.line,
+              side: /** @type {'RIGHT'} */ ('RIGHT'),
+              ...(comment.start_line !== undefined && {
+                start_line: comment.start_line,
+                start_side: /** @type {'RIGHT'} */ ('RIGHT'),
+              }),
+            }
+            debugVerbose(() =>
+              `Outgoing review comment request params: review=${reviewId} path=${comment.path} start_line=${comment.start_line ?? ''} line=${comment.line} commit=${commit_id.slice(0,7)} has_start=${comment.start_line !== undefined} bodyLen=${comment.body.length}`
+            )
+            return params
+          })()
         )
         return response.data
       } catch (err) {
