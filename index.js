@@ -420,11 +420,26 @@ async function createReview({
     const listFn = /** @type {any} */ (octokit.pulls).listReviews
     if (typeof listFn !== 'function') return null
     try {
-      const { data: reviews } = await listFn(prContext)
-      const pending = reviews.find(
+      const { data: reviews } = await listFn({ ...prContext, per_page: 100 })
+      const pending = reviews.find((r) => r.state === 'PENDING')
+      if (pending) {
+        debug(
+          `findActorPendingReview: saw ${reviews.length} reviews; first pending id=${pending.id} user=${pending.user?.login} actor=${actor}`
+        )
+      } else {
+        debug(
+          `findActorPendingReview: no pending review among ${reviews.length} reviews for actor=${actor}`
+        )
+      }
+      const actorPending = reviews.find(
         (r) => r.state === 'PENDING' && (!actor || r.user?.login === actor)
       )
-      return pending ? pending.id : null
+      if (!actorPending && pending && pending.user?.login) {
+        debug(
+          `findActorPendingReview: pending review exists but belongs to ${pending.user.login}, not current actor ${actor}`
+        )
+      }
+      return actorPending ? actorPending.id : null
     } catch (err) {
       debug(
         `Could not list reviews to detect existing pending review: ${
@@ -554,7 +569,20 @@ async function createReview({
           : 'Batch review creation failed (422: one pending review per pull request). Reusing actor pending review if present.'
       )
       if (isDuplicatePendingReviewError(err)) {
-        const existingPendingId = await findActorPendingReview()
+        // Retry a few times to locate the actor's pending review (eventual consistency or race).
+        let existingPendingId = await findActorPendingReview()
+        if (!existingPendingId) {
+          for (let attempt = 1; attempt <= 3 && !existingPendingId; attempt++) {
+            await new Promise((r) => setTimeout(r, 250 * attempt))
+            existingPendingId = await findActorPendingReview()
+            if (existingPendingId) {
+              debug(
+                `Duplicate salvage: found actor pending review on retry attempt ${attempt}.`
+              )
+              break
+            }
+          }
+        }
         if (existingPendingId) {
           let added = 0
           let skipped = 0
@@ -580,8 +608,11 @@ async function createReview({
           )
           return { comments, reviewCreated: true }
         }
-        // If no actor pending found, propagate error (foreign pending review present).
-        throw err
+        // Could not find the pending review even though API reported duplicate. Log + graceful skip.
+        debug(
+          'Duplicate 422 reported, but no actor-owned pending review could be located after retries; skipping suggestions without failing action.'
+        )
+        return { comments: [], reviewCreated: false }
       }
       // line-outside-diff salvage path
     const reviewId = await createPendingReview()
