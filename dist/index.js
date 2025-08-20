@@ -59003,14 +59003,19 @@ function getFilePath(ctx, input, type) {
 
 
 
+
 /** @typedef {import('parse-git-diff').AnyLineChange} AnyLineChange */
 /** @typedef {import('parse-git-diff').AddedLine} AddedLine */
 /** @typedef {import('parse-git-diff').DeletedLine} DeletedLine */
 /** @typedef {import('parse-git-diff').UnchangedLine} UnchangedLine */
 /** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
 /** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
+/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data']} CreatedReviewComment */
+/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['response']['data']} CreatedReview */
+/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/comments']['parameters']} CreateReviewCommentParams */
+/** @typedef {Pick<CreateReviewCommentParams,'path'|'body'|'line'> & { start_line?: CreateReviewCommentParams['start_line'] }} ReviewCommentDraft */
+/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']>} ReviewEvent */
 /** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
-/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
 
 /**
  * @typedef {Object} SuggestionBody
@@ -59071,6 +59076,32 @@ const createSuggestion = (content) => {
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
   // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
   return `\`\`\`\`suggestion\n${content}\n\`\`\`\``
+}
+
+/**
+ * Format a line range for logging: "start-end" for multi-line, or "line" for single-line.
+ * @param {number | undefined} startLine - First line (undefined for single-line suggestions)
+ * @param {number} endLine - Last line (or the only line if single-line)
+ * @returns {string} Formatted line range
+ */
+function formatLineRange(startLine, endLine) {
+  return typeof startLine === 'number' && startLine !== endLine
+    ? `${startLine}-${endLine}`
+    : String(endLine)
+}
+
+/**
+ * Returns true for the known 422 "line must be part of the diff" validation failure.
+ * Strictly requires an Octokit RequestError so unrelated errors are rethrown.
+ * @param {unknown} err
+ * @returns {err is RequestError}
+ */
+function isLineOutsideDiffError(err) {
+  return (
+    err instanceof RequestError &&
+    err.status === 422 &&
+    /line must be part of the diff/i.test(String(err.message))
+  )
 }
 
 /**
@@ -59214,7 +59245,7 @@ const generateCommentKey = (comment) =>
  * Generate GitHub review comments from a parsed diff (exported for testing)
  * @param {ReturnType<typeof parseGitDiff>} parsedDiff - Parsed diff from parse-git-diff
  * @param {Set<string>} existingCommentKeys - Set of existing comment keys to avoid duplicates
- * @returns {Array<{path: string, body: string, line: number, start_line?: number, start_side?: string}>} Generated comments
+ * @returns {Array<ReviewCommentDraft & { start_side?: string }>} Generated comments
  */
 function generateReviewComments(
   parsedDiff,
@@ -59237,7 +59268,7 @@ function generateReviewComments(
  * @param {{start: number}} fromFileRange - File range information
  * @param {AnyLineChange[]} changes - Changes in the chunk
  * @param {Set<string>} existingCommentKeys - Set of existing comment keys
- * @returns {Array<{path: string, body: string, line: number, start_line?: number, start_side?: string}>} Generated comments
+ * @returns {Array<ReviewCommentDraft & { start_side?: string }>} Generated comments
  */
 const processChunkChanges = (
   path,
@@ -59271,7 +59302,12 @@ const processChunkChanges = (
     // Skip if comment already exists
     const commentKey = generateCommentKey(comment)
     if (existingCommentKeys.has(commentKey)) {
-      (0,core.info)(`Skipping suggestion for ${comment.path}:${comment.line}${comment.start_line ? `-${comment.start_line}` : ''} to avoid duplicating existing review comment`)
+      (0,core.info)(
+        `Skipping suggestion for ${comment.path}:${formatLineRange(
+          comment.start_line,
+          comment.line
+        )} to avoid duplicating existing review comment`
+      )
       return []
     }
     return [comment]
@@ -59308,17 +59344,61 @@ async function run({
   const existingComments = (
     await octokit.pulls.listReviewComments({ owner, repo, pull_number })
   ).data
-
   const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 
   const comments = generateReviewComments(parsedDiff, existingCommentKeys)
+  if (comments.length === 0) {
+    return { comments: [], reviewCreated: false }
+  }
 
-  // Create a review with the suggested changes if there are any
-  if (comments.length > 0) {
+  return await createReview({
+    octokit,
+    owner,
+    repo,
+    pull_number,
+    commit_id,
+    body,
+    event,
+    comments,
+  })
+}
+
+/**
+ * Unified review creation helper. Assumes comments array is non-empty.
+ * Strategy:
+ * 1. Attempt batch review creation with all comments.
+ * 2. If it fails with the specific 422 "line must be part of the diff" error,
+ *    create a pending review, add each comment individually (skipping only those
+ *    that trigger the same 422), then submit if at least one was added.
+ * 3. If every per-comment add fails, delete the pending review (best-effort) and
+ *    report no review created.
+ * @param {Object} params
+ * @param {Octokit} params.octokit
+ * @param {string} params.owner
+ * @param {string} params.repo
+ * @param {number} params.pull_number
+ * @param {string} params.commit_id
+ * @param {string} params.body
+ * @param {ReviewEvent} params.event
+ * @param {Array} params.comments
+ * @returns {Promise<{comments: Array, reviewCreated: boolean}>}
+ */
+async function createReview({
+  octokit,
+  owner,
+  repo,
+  pull_number,
+  commit_id,
+  body,
+  event,
+  comments,
+}) {
+  const prContext = { owner, repo, pull_number }
+
+  /** Attempt to create a review with all comments. Throws on failure. */
+  async function createReviewWithComments() {
     await octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number,
+      ...prContext,
       commit_id,
       body,
       event,
@@ -59326,10 +59406,106 @@ async function run({
     })
   }
 
-  return { comments, reviewCreated: comments.length > 0 }
+  /** Create a pending review and return its ID.
+   * @returns {Promise<CreatedReview['id']>} */
+  async function createPendingReview() {
+    /** @type {{ data: CreatedReview }} */
+    const pending = await octokit.pulls.createReview({
+      ...prContext,
+      commit_id,
+      body,
+    })
+    return pending.data.id
+  }
+
+  /**
+   * Attempt to add a single review comment.
+   * Returns the created comment object on success, null if skipped due to the
+   * known 422 "line must be part of the diff" error, otherwise throws.
+   * @param {CreatedReview['id']} reviewId
+   * @param {ReviewCommentDraft} comment
+   * @returns {Promise<CreatedReviewComment | null>}
+   */
+  async function createReviewComment(reviewId, comment) {
+    try {
+      const response = await octokit.pulls.createReviewComment({
+        ...prContext,
+        commit_id,
+        pull_request_review_id: reviewId,
+        body: comment.body,
+        path: comment.path,
+        line: comment.line,
+        side: /** @type {'RIGHT'} */ ('RIGHT'),
+        ...(comment.start_line !== undefined && {
+          start_line: comment.start_line,
+          start_side: /** @type {'RIGHT'} */ ('RIGHT'),
+        }),
+      })
+      return response.data
+    } catch (err) {
+      if (isLineOutsideDiffError(err)) {
+        (0,core.info)(
+          `Could not create suggestion (line outside PR diff) for ${
+            comment.path
+          }:${formatLineRange(comment.start_line, comment.line)}`
+        )
+        return null
+      }
+      throw err
+    }
+  }
+
+  /** Delete a pending review.
+   * @param {CreatedReview['id']} review_id
+   * @returns {Promise<void>}
+   */
+  async function deletePendingReview(review_id) {
+    try {
+      await octokit.pulls.deletePendingReview({ ...prContext, review_id })
+    } catch (err) {
+      (0,core.debug)(
+        `Failed to delete pending review ${review_id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      )
+    }
+  }
+
+  try {
+    await createReviewWithComments()
+    return { comments, reviewCreated: true }
+  } catch (err) {
+    if (!isLineOutsideDiffError(err)) throw err
+    ;(0,core.debug)(
+      'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
+    )
+    const reviewId = await createPendingReview()
+    let added = 0
+    let skipped = 0
+    for (const comment of comments) {
+      const created = await createReviewComment(reviewId, comment)
+      if (created) added++
+      else skipped++
+    }
+    if (added === 0) {
+      (0,core.debug)(
+        'No review comments could be added; pending review will not be submitted.'
+      )
+      await deletePendingReview(reviewId)
+      return { comments: [], reviewCreated: false }
+    }
+    await octokit.pulls.submitReview({
+      ...prContext,
+      review_id: reviewId,
+      body,
+      event,
+    })
+    ;(0,core.debug)(`Submitted salvage review (added: ${added}, skipped: ${skipped}).`)
+    return { comments, reviewCreated: true }
+  }
 }
 
-// Only run main logic when this file is executed directly (not when imported)
+// Main entrypoint (only when executed directly)
 async function main() {
   const octokit = new dist_bundle_Octokit({
     userAgent: 'suggest-changes',
@@ -59344,7 +59520,7 @@ async function main() {
 
   if (!eventPayload?.pull_request) {
     const eventName = String(external_node_process_namespaceObject.env.GITHUB_EVENT_NAME)
-      throw new Error(
+    throw new Error(
       [
         `This workflow was triggered via ${eventName}.`,
         `The ${eventName} event payload does not include the pull_request data required by this action.`,
@@ -59366,16 +59542,7 @@ async function main() {
   const event = /** @type {ReviewEvent} */ ((0,core.getInput)('event').toUpperCase())
   const body = (0,core.getInput)('comment')
 
-  await run({
-    octokit,
-    owner,
-    repo,
-    pull_number,
-    commit_id,
-    diff,
-    event,
-    body,
-  })
+  await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body })
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
