@@ -666,94 +666,34 @@ async function createReview({
     }
   }
 
-  try {
-    // If any pending review already exists, skip batch and salvage directly into it.
-    const existingPendingId = await findPendingReview()
-      if (existingPendingId) {
-        debug(
-      `Found existing pending review ${existingPendingId}; skipping batch and adding comments individually.`
-        )
-        const salvageInto = async (pendingId) => {
-          let added = 0
-            let skipped = 0
-            for (const comment of comments) {
-              try {
-                const created = await createReviewComment(pendingId, comment)
-                if (created) added++
-                else skipped++
-              } catch (e) {
-                if (e instanceof RequestError && e.status === 404) {
-                  debug(`Pending review ${pendingId} became stale (404) during salvage; will recreate.`)
-                  return { stale: true, added, skipped }
-                }
-                throw e
-              }
-            }
-            return { stale: false, added, skipped }
-        }
-
-        let result = await salvageInto(existingPendingId)
-        let finalPendingId = existingPendingId
-        if (result.stale) {
-          debug(`Attempting to delete stale pending review ${existingPendingId} before creating fresh one.`)
-          await deletePendingReview(existingPendingId)
-          // Small wait to allow deletion to propagate
-          await new Promise((r) => setTimeout(r, 300))
-          let freshId = null
-          for (let attempt = 1; attempt <= 3; attempt++) {
-            try {
-              freshId = await createPendingReview()
-              debug(`Fresh pending review created (attempt ${attempt}) id=${freshId}`)
-              break
-            } catch (e) {
-              if (
-                e instanceof RequestError &&
-                e.status === 422 &&
-                /only have one pending review/i.test(String(e.message))
-              ) {
-                debug(
-                  `Duplicate 422 while creating fresh pending review (attempt ${attempt}); will re-list and retry.`
-                )
-                await new Promise((r) => setTimeout(r, 250 * attempt))
-                continue
-              }
-              debug(
-                `Failed creating fresh pending review (attempt ${attempt}): ${
-                  e instanceof Error ? e.message : String(e)
-                }`
-              )
-              throw e
-            }
-          }
-          if (!freshId) {
-            debug(
-              'Unable to create fresh pending review after retries; skipping salvage.'
-            )
-            return { comments: [], reviewCreated: false }
-          }
-          result = await salvageInto(freshId)
-          if (result.stale) {
-            debug(
-              'Newly created pending review also returned stale 404; aborting salvage without failing action.'
-            )
-            return { comments: [], reviewCreated: false }
-          }
-          finalPendingId = freshId
-        }
-        debug(`Salvage into pending review id=${finalPendingId} added=${result.added} skipped=${result.skipped}`)
-        if (result.added === 0) {
-          debug('Pending review salvage added no comments; leaving it unsubmitted.')
-          return { comments: [], reviewCreated: false }
-        }
-        await octokit.pulls.submitReview({
-          ...prContext,
-          review_id: finalPendingId,
-          body,
-          event,
-        })
-        debug(`Submitted pending review salvage (added: ${result.added}, skipped: ${result.skipped}).`)
-        return { comments, reviewCreated: true }
+  /** Delete all pending reviews for a clean slate at start. */
+  async function deleteAllPendingReviews() {
+    const listFn = /** @type {any} */ (octokit.pulls).listReviews
+    if (typeof listFn !== 'function') return
+    try {
+      const { data: reviews } = await listFn({ ...prContext, per_page: 100 })
+      const pending = reviews.filter((r) => r.state === 'PENDING')
+      if (pending.length) {
+        debug(`Deleting ${pending.length} existing pending review(s) before starting.`)
+      } else {
+        debug('No existing pending reviews to delete.')
       }
+      for (const r of pending) {
+        debug(`Deleting pending review id=${r.id} user=${r.user?.login}`)
+        await deletePendingReview(r.id)
+      }
+    } catch (e) {
+      debug(
+        `Unable to list reviews for cleanup: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      )
+    }
+  }
+
+  try {
+      // Always start clean: delete any existing pending reviews first.
+      await deleteAllPendingReviews()
       await createReviewWithComments()
       return { comments, reviewCreated: true }
   } catch (err) {
@@ -762,57 +702,36 @@ async function createReview({
       debug(
         isLineOutsideDiffError(err)
           ? 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
-          : 'Batch review creation failed (422: one pending review per pull request). Reusing existing pending review if present.'
+          : 'Batch review creation failed (422: one pending review per pull request) even after cleanup; attempting forced fresh pending salvage.'
       )
       if (err instanceof Error) {
         debug(`Batch failure detail: ${err.message}`)
       }
       if (isDuplicatePendingReviewError(err)) {
-        // Retry a few times to locate the pending review (eventual consistency or race).
-        let existingPendingId = await findPendingReview()
-        if (!existingPendingId) {
-          for (let attempt = 1; attempt <= 3 && !existingPendingId; attempt++) {
-            await new Promise((r) => setTimeout(r, 250 * attempt))
-            existingPendingId = await findPendingReview()
-            if (existingPendingId) {
-              debug(
-                `Duplicate salvage: found pending review on retry attempt ${attempt}.`
-              )
-              break
-            }
-          }
+        // Cleanup again & attempt fresh pending salvage.
+        await deleteAllPendingReviews()
+        const reviewId = await createPendingReview()
+        let added = 0
+        let skipped = 0
+        for (const comment of comments) {
+          const created = await createReviewComment(reviewId, comment)
+          if (created) added++
+          else skipped++
         }
-        if (existingPendingId) {
-          let added = 0
-          let skipped = 0
-          for (const comment of comments) {
-            const created = await createReviewComment(existingPendingId, comment)
-            if (created) added++
-            else skipped++
-          }
-          debug(
-            `Duplicate salvage into existing pending review id=${existingPendingId} added=${added} skipped=${skipped}`
-          )
-          if (added === 0) {
-            debug(
-              'Duplicate path reuse: no comments added; not submitting existing pending review.'
-            )
-            return { comments: [], reviewCreated: false }
-          }
-          await octokit.pulls.submitReview({
-            ...prContext,
-            review_id: existingPendingId,
-            body,
-            event,
-          })
-          debug(
-            `Submitted duplicate salvage on existing pending review (added: ${added}, skipped: ${skipped}).`
-          )
-          return { comments, reviewCreated: true }
+        debug(
+          `Duplicate salvage after forced cleanup into pending review ${reviewId} added=${added} skipped=${skipped}`
+        )
+        if (added === 0) {
+          await deletePendingReview(reviewId)
+          return { comments: [], reviewCreated: false }
         }
-        // Could not find the pending review even though API reported duplicate. Log + graceful skip.
-  debug('Duplicate 422 reported, but no pending review could be located after retries; skipping suggestions without failing action.')
-        return { comments: [], reviewCreated: false }
+        await octokit.pulls.submitReview({
+          ...prContext,
+          review_id: reviewId,
+          body,
+          event,
+        })
+        return { comments, reviewCreated: true }
       }
       // line-outside-diff salvage path
     const reviewId = await createPendingReview()
