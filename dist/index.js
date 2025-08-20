@@ -59010,8 +59010,7 @@ function getFilePath(ctx, input, type) {
 /** @typedef {import('parse-git-diff').UnchangedLine} UnchangedLine */
 /** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
 /** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} ReviewCommentInput */
-/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/comments']['parameters']} CreateReviewCommentParams */
-/** @typedef {Pick<CreateReviewCommentParams,'path'|'body'|'start_line'> & { line: number }} ReviewCommentDraft */
+/** @typedef {ReviewCommentInput & { line: number }} ReviewCommentDraft */
 /** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']>} ReviewEvent */
 /** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
 
@@ -59245,7 +59244,7 @@ const generateCommentKey = (comment) =>
  * Generate GitHub review comments from a parsed diff (exported for testing)
  * @param {ReturnType<typeof parseGitDiff>} parsedDiff - Parsed diff from parse-git-diff
  * @param {Set<string>} existingCommentKeys - Set of existing comment keys to avoid duplicates
- * @returns {Array<ReviewCommentDraft & { start_side?: string }>} Generated comments
+ * @returns {Array<ReviewCommentDraft>} Generated comments
  */
 function generateReviewComments(
   parsedDiff,
@@ -59268,7 +59267,7 @@ function generateReviewComments(
  * @param {{start: number}} fromFileRange - File range information
  * @param {AnyLineChange[]} changes - Changes in the chunk
  * @param {Set<string>} existingCommentKeys - Set of existing comment keys
- * @returns {Array<ReviewCommentDraft & { start_side?: string }>} Generated comments
+ * @returns {Array<ReviewCommentDraft>} Generated comments
  */
 const processChunkChanges = (
   path,
@@ -59292,12 +59291,12 @@ const processChunkChanges = (
     )
 
     // Create comment with conditional multi-line properties
-    const comment = {
+    const comment = /** @type {ReviewCommentDraft} */ ({
       path,
       body,
       line: endLine,
       ...(lineCount > 1 && { start_line: startLine, start_side: 'RIGHT' }),
-    }
+    })
 
     // Skip if comment already exists
     const commentKey = generateCommentKey(comment)
