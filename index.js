@@ -353,8 +353,32 @@ export async function run({
 
   const comments = generateReviewComments(parsedDiff, existingCommentKeys)
   // PR diff canonical filtering: fetch server-side diff, ensure anchors exist on RIGHT side there.
-  try {
-    if (typeof (/** @type {any} */ (octokit).request) === 'function') {
+  await pruneSuggestionsNotInPRDiff({
+    octokit,
+    owner,
+    repo,
+    pull_number,
+    comments,
+  })
+  /**
+   * Filters suggestion comments using the canonical server-side PR diff.
+   * Mutates the comments array in place, removing invalid suggestions and logging summary info.
+   * @param {Object} params
+   * @param {Octokit} params.octokit
+   * @param {string} params.owner
+   * @param {string} params.repo
+   * @param {number} params.pull_number
+   * @param {Array<ReviewCommentDraft>} params.comments
+   */
+  async function pruneSuggestionsNotInPRDiff({
+    octokit,
+    owner,
+    repo,
+    pull_number,
+    comments,
+  }) {
+    try {
+      if (typeof (/** @type {any} */ (octokit).request) !== 'function') return
       const prDiffResp = await /** @type {any} */ (octokit).request(
         'GET /repos/{owner}/{repo}/pulls/{pull_number}',
         {
@@ -368,81 +392,87 @@ export async function run({
         prDiffResp && typeof prDiffResp.data === 'string'
           ? prDiffResp.data
           : null
-      if (prDiffText && prDiffText.startsWith('diff --git')) {
-        const prParsed = parseGitDiff(prDiffText)
-        /** @type {Record<string, Set<number>>} */
-        const validRightLines = {}
-        for (const file of prParsed.files) {
-          if (file.type !== 'ChangedFile') continue
-          const set = new Set()
-          for (const chunk of file.chunks) {
-            if (chunk.type !== 'Chunk') continue
-            for (const ch of chunk.changes) {
-              if (isAddedLine(ch) || isUnchangedLine(ch)) set.add(ch.lineAfter)
-            }
-          }
-          validRightLines[file.path] = set
-        }
-        const initialCount = comments.length
-    let kept = 0
-    let skippedAnchors = 0
-        /** @type {Set<string>} */
-        const missingFiles = new Set()
-        for (let i = comments.length - 1; i >= 0; i--) {
-          const c = comments[i]
-          const set = validRightLines[c.path]
-          if (!set) {
-            debug(
-              `Skipping suggestion (file missing) ${c.path}:${formatLineRange(
-                c.start_line,
-                c.line
-              )}`
-            )
-            comments.splice(i, 1)
-            missingFiles.add(c.path)
-            continue
-          }
-          const lineOk = set.has(c.line)
-          const startOk = c.start_line === undefined || set.has(c.start_line)
-          if (lineOk && startOk) {
-            kept++
-            continue
-          }
-            debug(
-              `Skipping suggestion (invalid anchor) ${c.path}:${formatLineRange(
-                c.start_line,
-                c.line
-              )}`
-            )
-            comments.splice(i, 1)
-            skippedAnchors++
-        }
-        if (initialCount > 0) {
-          const plural = (n) => (n === 1 ? '' : 's')
-          info(
-            `Prepared ${kept} suggestion${plural(kept)} for review (from ${initialCount} initial).`
-          )
-            if (skippedAnchors > 0) {
-              info(
-                `Skipped ${skippedAnchors} suggestion${plural(skippedAnchors)} because line(s) are not part of the pull request diff.`
-              )
-            }
-          if (missingFiles.size > 0) {
-            info(
-              `Skipped suggestions in ${missingFiles.size} file${plural(missingFiles.size)} that are not part of the pull request.`
-            )
-          }
-        }
-      } else {
+      if (!prDiffText || !prDiffText.startsWith('diff --git')) {
         debug(
           'PR diff filter: unexpected server diff format; skipping canonical filtering.'
         )
+        return
       }
+      const prParsed = parseGitDiff(prDiffText)
+      /** @type {Record<string, Set<number>>} */
+      const validRightLines = {}
+      for (const file of prParsed.files) {
+        if (file.type !== 'ChangedFile') continue
+        const set = new Set()
+        for (const chunk of file.chunks) {
+          if (chunk.type !== 'Chunk') continue
+          for (const ch of chunk.changes) {
+            if (isAddedLine(ch) || isUnchangedLine(ch)) set.add(ch.lineAfter)
+          }
+        }
+        validRightLines[file.path] = set
+      }
+      const initialCount = comments.length
+      let kept = 0
+      let skippedAnchors = 0
+      /** @type {Set<string>} */
+      const missingFiles = new Set()
+      for (let i = comments.length - 1; i >= 0; i--) {
+        const c = comments[i]
+        const set = validRightLines[c.path]
+        if (!set) {
+          debug(
+            `Skipping suggestion (file missing) ${c.path}:${formatLineRange(
+              c.start_line,
+              c.line
+            )}`
+          )
+          comments.splice(i, 1)
+          missingFiles.add(c.path)
+          continue
+        }
+        const lineOk = set.has(c.line)
+        const startOk = c.start_line === undefined || set.has(c.start_line)
+        if (lineOk && startOk) {
+          kept++
+          continue
+        }
+        debug(
+          `Skipping suggestion (invalid anchor) ${c.path}:${formatLineRange(
+            c.start_line,
+            c.line
+          )}`
+        )
+        comments.splice(i, 1)
+        skippedAnchors++
+      }
+      if (initialCount > 0) {
+        const plural = (n) => (n === 1 ? '' : 's')
+        info(
+          `Prepared ${kept} suggestion${plural(
+            kept
+          )} for review (from ${initialCount} initial).`
+        )
+        if (skippedAnchors > 0) {
+          info(
+            `Skipped ${skippedAnchors} suggestion${plural(
+              skippedAnchors
+            )} because line(s) are not part of the pull request diff.`
+          )
+        }
+        if (missingFiles.size > 0) {
+          info(
+            `Skipped suggestions in ${missingFiles.size} file${plural(
+              missingFiles.size
+            )} that are not part of the pull request.`
+          )
+        }
+      }
+    } catch (e) {
+      debug(
+        `PR diff filter failed: ${e instanceof Error ? e.message : String(e)}`
+      )
     }
-  } catch (e) {
-    debug(
-      `PR diff filter failed: ${e instanceof Error ? e.message : String(e)}`
-    )
   }
   debug(
     `Prepared ${comments.length} new suggestion comments (existing review comments: ${existingComments.length}).`
