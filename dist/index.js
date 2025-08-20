@@ -59444,6 +59444,14 @@ async function createReview({
     try {
       const { data: reviews } = await listFn({ ...prContext, per_page: 100 })
       const pending = reviews.find((r) => r.state === 'PENDING')
+      ;(0,core.debug)(
+        `Reviews snapshot: ${reviews
+          .map(
+            (r) =>
+              `${r.id}:${r.state}${r.user?.login ? '@' + r.user.login : ''}`
+          )
+          .join(', ') || 'none'}`
+      )
       if (pending) {
         (0,core.debug)(
           `findPendingReview: found pending review id=${pending.id} user=${pending.user?.login} (total reviews scanned: ${reviews.length})`
@@ -59597,10 +59605,47 @@ async function createReview({
         let result = await salvageInto(existingPendingId)
         let finalPendingId = existingPendingId
         if (result.stale) {
-          const freshId = await createPendingReview()
+          (0,core.debug)(`Attempting to delete stale pending review ${existingPendingId} before creating fresh one.`)
+          await deletePendingReview(existingPendingId)
+          // Small wait to allow deletion to propagate
+          await new Promise((r) => setTimeout(r, 300))
+          let freshId = null
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              freshId = await createPendingReview()
+              ;(0,core.debug)(`Fresh pending review created (attempt ${attempt}) id=${freshId}`)
+              break
+            } catch (e) {
+              if (
+                e instanceof RequestError &&
+                e.status === 422 &&
+                /only have one pending review/i.test(String(e.message))
+              ) {
+                (0,core.debug)(
+                  `Duplicate 422 while creating fresh pending review (attempt ${attempt}); will re-list and retry.`
+                )
+                await new Promise((r) => setTimeout(r, 250 * attempt))
+                continue
+              }
+              (0,core.debug)(
+                `Failed creating fresh pending review (attempt ${attempt}): ${
+                  e instanceof Error ? e.message : String(e)
+                }`
+              )
+              throw e
+            }
+          }
+          if (!freshId) {
+            (0,core.debug)(
+              'Unable to create fresh pending review after retries; skipping salvage.'
+            )
+            return { comments: [], reviewCreated: false }
+          }
           result = await salvageInto(freshId)
           if (result.stale) {
-            (0,core.debug)('Newly created pending review also returned stale 404; aborting salvage without failing action.')
+            (0,core.debug)(
+              'Newly created pending review also returned stale 404; aborting salvage without failing action.'
+            )
             return { comments: [], reviewCreated: false }
           }
           finalPendingId = freshId
