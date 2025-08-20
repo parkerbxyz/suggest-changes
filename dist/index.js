@@ -59118,11 +59118,6 @@ function isDuplicatePendingReviewError(err) {
   )
 }
 
-/** Returns true when a 404 occurs (stale pending review, missing resource, etc.). */
-function isNotFoundError(err) {
-  return err instanceof RequestError && err.status === 404
-}
-
 /**
  * Filter changes by type for easier processing
  * @param {AnyLineChange[]} changes - Array of changes to filter
@@ -59425,36 +59420,44 @@ async function createReview({
     })
   }
 
-  /** Ensure a pending review exists (reuse existing or create new).
-   * Returns { id, commitId, reused }.
-   * If reusing and commit differs, we log a debug note and still proceed anchoring to the existing review commit. */
-  async function ensurePendingReview() {
-    try {
-      /** @type {{ data: CreatedReview }} */
-      const created = await octokit.pulls.createReview({
-        ...prContext,
-        commit_id,
-        body,
-      })
-      return { id: created.data.id, commitId: commit_id, reused: false }
-    } catch (err) {
-      if (!isDuplicatePendingReviewError(err)) throw err
-      const existing = await octokit.pulls.listReviews(prContext)
-      const pending = existing.data.find((r) => r.state === 'PENDING')
-      if (!pending) throw err
-      if (pending.commit_id && pending.commit_id !== commit_id) {
+  /** Purge any existing pending reviews then create a fresh pending review.
+   * Returns the new review id. */
+  async function purgeAndCreatePendingReview() {
+    // List current reviews, delete all pending ones (best effort)
+    const existing = await octokit.pulls.listReviews(prContext)
+    const pending = existing.data.filter((r) => r.state === 'PENDING')
+    for (const r of pending) {
+      try {
+        await octokit.pulls.deletePendingReview({ ...prContext, review_id: r.id })
+        ;(0,core.debug)(`Deleted stale pending review ${r.id}`)
+      } catch (delErr) {
         (0,core.debug)(
-          `Reusing pending review ${pending.id} created for commit ${pending.commit_id} (current head ${commit_id}). Suggestions will attach to the older commit.`
+          `Failed to delete stale pending review ${r.id}: ${
+            delErr instanceof Error ? delErr.message : String(delErr)
+          }`
         )
-      } else {
-        (0,core.debug)(`Reusing existing pending review ${pending.id} (duplicate 422).`)
-      }
-      return {
-        id: pending.id,
-        commitId: pending.commit_id || commit_id,
-        reused: true,
       }
     }
+    // Create fresh pending review. If duplicate still happens, we attempt one quick retry after a short delay.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        /** @type {{ data: CreatedReview }} */
+        const created = await octokit.pulls.createReview({
+          ...prContext,
+          commit_id,
+          body,
+        })
+        return created.data.id
+      } catch (err) {
+        if (isDuplicatePendingReviewError(err) && attempt === 1) {
+          (0,core.debug)('Duplicate pending review after purge; retrying once.')
+          await new Promise((res) => setTimeout(res, 300))
+          continue
+        }
+        throw err
+      }
+    }
+    throw new Error('Unable to create pending review after purge attempts.')
   }
 
   /**
@@ -59524,63 +59527,18 @@ async function createReview({
         ? 'Batch review creation failed (422: one pending review per pull request). Falling back to pending review salvage path.'
         : 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
     )
-    let { id: reviewId, commitId: salvageCommitId, reused } =
-      await ensurePendingReview()
-    if (reused && salvageCommitId !== commit_id) {
-      (0,core.debug)(
-        `Salvage path using reused review commit ${salvageCommitId}; diff generated for ${commit_id}. Potential line anchoring mismatches may occur.`
-      )
-    }
+    const reviewId = await purgeAndCreatePendingReview()
+    const salvageCommitId = commit_id
     let added = 0
     let skipped = 0
-    let staleRetried = false
     for (const comment of comments) {
-      try {
-        const created = await createReviewComment(
-          reviewId,
-          comment,
-          salvageCommitId
-        )
-        if (created) added++
-        else skipped++
-      } catch (err) {
-        // If the reused pending review vanished (404), attempt one fresh create then retry this comment once.
-        if (reused && !staleRetried && isNotFoundError(err)) {
-          (0,core.debug)(
-            `Reused pending review ${reviewId} returned 404 (stale). Attempting to create a fresh pending review and retry.`
-          )
-          staleRetried = true
-          reused = false
-          try {
-            /** @type {{ data: CreatedReview }} */
-            const fresh = await octokit.pulls.createReview({
-              ...prContext,
-              commit_id,
-              body,
-            })
-            reviewId = fresh.data.id
-            salvageCommitId = commit_id
-            const created = await createReviewComment(
-              reviewId,
-              comment,
-              salvageCommitId
-            )
-            if (created) added++
-            else skipped++
-            continue
-          } catch (freshErr) {
-            if (isDuplicatePendingReviewError(freshErr)) {
-              (0,core.debug)(
-                'Unexpected duplicate pending review after stale 404; skipping comment.'
-              )
-              skipped++
-              continue
-            }
-            throw freshErr
-          }
-        }
-        throw err
-      }
+      const created = await createReviewComment(
+        reviewId,
+        comment,
+        salvageCommitId
+      )
+      if (created) added++
+      else skipped++
     }
     if (added === 0) {
       (0,core.debug)(
@@ -59589,25 +59547,13 @@ async function createReview({
       await deletePendingReview(reviewId)
       return { comments: [], reviewCreated: false }
     }
-    try {
-      await octokit.pulls.submitReview({
-        ...prContext,
-        review_id: reviewId,
-        body,
-        event,
-      })
-    } catch (submitErr) {
-      if (isNotFoundError(submitErr) && !reused) {
-        (0,core.debug)(
-          `Pending review ${reviewId} disappeared before submission (404). Treating as no-op salvage.`
-        )
-        return { comments: [], reviewCreated: false }
-      }
-      throw submitErr
-    }
-    (0,core.debug)(
-      `Submitted salvage review (added: ${added}, skipped: ${skipped}, reusedPending: ${reused}, staleRetried: ${staleRetried}).`
-    )
+    await octokit.pulls.submitReview({
+      ...prContext,
+      review_id: reviewId,
+      body,
+      event,
+    })
+    ;(0,core.debug)(`Submitted salvage review (added: ${added}, skipped: ${skipped}).`)
     return { comments, reviewCreated: true }
   }
 }
