@@ -59680,22 +59680,37 @@ async function createReview({
               const stillThere = reviews.some(
                 (r) => r.id === reviewId && r.state === 'PENDING'
               )
-              debugVerbose(() => `404 diagnostic: stillThere=${stillThere} reviewsCount=${reviews.length}`)
+              debugVerbose(
+                () =>
+                  `404 diagnostic: target=${comment.path}:${formatLineRange(
+                    comment.start_line,
+                    comment.line
+                  )} stillThere=${stillThere} reviewsCount=${reviews.length}`
+              )
               if (stillThere && attempt < maxAttempts) {
                 const delay = 150 * attempt
                 ;(0,core.debug)(
-                  `404 adding comment to pending review ${reviewId} (attempt ${attempt}); review still listed as PENDING. Retrying after ${delay}ms.`
+                  `404 adding comment ${comment.path}:${formatLineRange(
+                    comment.start_line,
+                    comment.line
+                  )} to pending review ${reviewId} (attempt ${attempt}); review still listed as PENDING. Retrying after ${delay}ms.`
                 )
                 await new Promise((r) => setTimeout(r, delay))
                 continue
               }
               if (!stillThere) {
                 (0,core.debug)(
-                  `404 adding comment: pending review ${reviewId} no longer present (considered stale) after attempt ${attempt}.`
+                  `404 adding comment ${comment.path}:${formatLineRange(
+                    comment.start_line,
+                    comment.line
+                  )}: pending review ${reviewId} no longer present (considered stale) after attempt ${attempt}.`
                 )
               } else {
                 (0,core.debug)(
-                  `404 adding comment persists after ${attempt} attempts; treating review ${reviewId} as stale.`
+                  `404 adding comment ${comment.path}:${formatLineRange(
+                    comment.start_line,
+                    comment.line
+                  )} persists after ${attempt} attempts; treating review ${reviewId} as stale.`
                 )
               }
             } catch (listErr) {
