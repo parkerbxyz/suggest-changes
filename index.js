@@ -580,31 +580,48 @@ async function createReview({
         debug(
       `Found existing pending review ${existingPendingId}; skipping batch and adding comments individually.`
         )
-        let added = 0
-        let skipped = 0
-        for (const comment of comments) {
-          const created = await createReviewComment(existingPendingId, comment)
-          if (created) added++
-          else skipped++
+        const salvageInto = async (pendingId) => {
+          let added = 0
+            let skipped = 0
+            for (const comment of comments) {
+              try {
+                const created = await createReviewComment(pendingId, comment)
+                if (created) added++
+                else skipped++
+              } catch (e) {
+                if (e instanceof RequestError && e.status === 404) {
+                  debug(`Pending review ${pendingId} became stale (404) during salvage; will recreate.`)
+                  return { stale: true, added, skipped }
+                }
+                throw e
+              }
+            }
+            return { stale: false, added, skipped }
         }
-        debug(
-          `Salvage into existing pending review id=${existingPendingId} added=${added} skipped=${skipped}`
-        )
-        if (added === 0) {
-          debug(
-            'Existing pending review received no new comments; leaving it unsubmitted.'
-          )
+
+        let result = await salvageInto(existingPendingId)
+        let finalPendingId = existingPendingId
+        if (result.stale) {
+          const freshId = await createPendingReview()
+          result = await salvageInto(freshId)
+          if (result.stale) {
+            debug('Newly created pending review also returned stale 404; aborting salvage without failing action.')
+            return { comments: [], reviewCreated: false }
+          }
+          finalPendingId = freshId
+        }
+        debug(`Salvage into pending review id=${finalPendingId} added=${result.added} skipped=${result.skipped}`)
+        if (result.added === 0) {
+          debug('Pending review salvage added no comments; leaving it unsubmitted.')
           return { comments: [], reviewCreated: false }
         }
         await octokit.pulls.submitReview({
           ...prContext,
-          review_id: existingPendingId,
+          review_id: finalPendingId,
           body,
           event,
         })
-        debug(
-          `Submitted existing pending review salvage (added: ${added}, skipped: ${skipped}).`
-        )
+        debug(`Submitted pending review salvage (added: ${result.added}, skipped: ${result.skipped}).`)
         return { comments, reviewCreated: true }
       }
       await createReviewWithComments()
