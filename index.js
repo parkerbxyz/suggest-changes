@@ -15,8 +15,6 @@ import parseGitDiff from 'parse-git-diff'
 /** @typedef {import('parse-git-diff').UnchangedLine} UnchangedLine */
 /** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
 /** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} ReviewCommentInput */
-/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data']} CreatedReviewComment */
-/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['response']['data']} CreatedReview */
 /** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/comments']['parameters']} CreateReviewCommentParams */
 /** @typedef {Pick<CreateReviewCommentParams,'path'|'body'|'start_line'> & { line: number }} ReviewCommentDraft */
 /** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']>} ReviewEvent */
@@ -74,6 +72,7 @@ export async function getGitDiff(gitArgs) {
 }
 
 /**
+ * Create a suggestion fenced block.
  * @param {string} content
  * @returns {string}
  */
@@ -97,33 +96,6 @@ function formatLineRange(startLine, line) {
 }
 
 /**
- * Extra verbose debug logging (enabled when either ACTIONS_STEP_DEBUG plus SUGGEST_CHANGES_VERBOSE=true or SUGGEST_CHANGES_DEBUG=true).
- * Wrap expensive string building in a function so we only compute when needed.
- * @param {() => string} msgFn
- */
-function debugVerbose(msgFn) {
-  if (
-    process.env.SUGGEST_CHANGES_VERBOSE === 'true' ||
-    process.env.SUGGEST_CHANGES_DEBUG === 'true'
-  ) {
-    try {
-      debug(msgFn())
-    } catch {
-      // ignore
-    }
-  }
-}
-
-/** Safely JSON.stringify for debug without throwing. */
-function safeJson(value, fallback = '') {
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return fallback
-  }
-}
-
-/**
  * Returns true for the known 422 "line must be part of the diff" validation failure.
  * Strictly requires an Octokit RequestError so unrelated errors are rethrown.
  * @param {unknown} err
@@ -134,19 +106,6 @@ function isLineOutsideDiffError(err) {
     err instanceof RequestError &&
     err.status === 422 &&
     /line must be part of the diff/i.test(String(err.message))
-  )
-}
-
-/**
- * Returns true for the 422 error when a user already has a pending review on the PR.
- * @param {unknown} err
- * @returns {err is RequestError}
- */
-function isDuplicatePendingReviewError(err) {
-  return (
-    err instanceof RequestError &&
-    err.status === 422 &&
-    /only have one pending review/i.test(String(err.message))
   )
 }
 
@@ -394,6 +353,96 @@ export async function run({
   const parsedDiff = parseGitDiff(diff)
 
   const comments = generateReviewComments(parsedDiff, existingCommentKeys)
+  // PR diff canonical filtering: fetch server-side diff, ensure anchors exist on RIGHT side there.
+  try {
+    if (typeof (/** @type {any} */ (octokit).request) === 'function') {
+      const prDiffResp = await /** @type {any} */ (octokit).request(
+        'GET /repos/{owner}/{repo}/pulls/{pull_number}',
+        {
+          owner,
+          repo,
+          pull_number,
+          headers: { accept: 'application/vnd.github.v3.diff' },
+        }
+      )
+      const prDiffText =
+        prDiffResp && typeof prDiffResp.data === 'string'
+          ? prDiffResp.data
+          : null
+      if (prDiffText && prDiffText.startsWith('diff --git')) {
+        const prParsed = parseGitDiff(prDiffText)
+        /** @type {Record<string, Set<number>>} */
+        const validRightLines = {}
+        for (const file of prParsed.files) {
+          if (file.type !== 'ChangedFile') continue
+          const set = new Set()
+          for (const chunk of file.chunks) {
+            if (chunk.type !== 'Chunk') continue
+            for (const ch of chunk.changes) {
+              if (isAddedLine(ch) || isUnchangedLine(ch)) set.add(ch.lineAfter)
+            }
+          }
+          validRightLines[file.path] = set
+        }
+        let kept = 0
+        let adjusted = 0
+        let dropped = 0
+        for (let i = comments.length - 1; i >= 0; i--) {
+          const c = comments[i]
+          const set = validRightLines[c.path]
+          if (!set) {
+            debug(
+              `PR diff filter: dropping ${c.path}:${formatLineRange(
+                c.start_line,
+                c.line
+              )} (file missing)`
+            ) // eslint-disable-line
+            comments.splice(i, 1)
+            dropped++
+            continue
+          }
+          const lineOk = set.has(c.line)
+          const startOk = c.start_line === undefined || set.has(c.start_line)
+          if (lineOk && startOk) {
+            kept++
+            continue
+          }
+          if (lineOk && c.start_line !== undefined) {
+            const original = formatLineRange(c.start_line, c.line)
+            delete c.start_line
+            delete c.start_side
+            adjusted++
+            kept++
+            debug(
+              `PR diff filter: adjusted multi-line -> single-line ${c.path}:${original} => ${c.line}`
+            )
+            continue
+          }
+          debug(
+            `PR diff filter: dropping ${c.path}:${formatLineRange(
+              c.start_line,
+              c.line
+            )} (invalid anchor)`
+          ) // eslint-disable-line
+          comments.splice(i, 1)
+          dropped++
+        }
+        debug(
+          `PR diff filter summary: kept=${kept} adjusted=${adjusted} dropped=${dropped} (input=${
+            kept + adjusted + dropped
+          })`
+        )
+      } else {
+        debug(
+          'PR diff filter: unexpected server diff format; skipping canonical filtering.'
+        )
+      }
+    }
+  } catch (e) {
+    debug(
+      `PR diff filter failed: ${e instanceof Error ? e.message : String(e)}`
+    )
+  }
   debug(
     `Prepared ${comments.length} new suggestion comments (existing review comments: ${existingComments.length}).`
   )
@@ -421,14 +470,9 @@ export async function run({
 }
 
 /**
- * Unified review creation helper. Assumes comments array is non-empty.
- * Strategy:
- * 1. Attempt batch review creation with all comments.
- * 2. If it fails with the specific 422 "line must be part of the diff" error,
- *    create a pending review, add each comment individually (skipping only those
- *    that trigger the same 422), then submit if at least one was added.
- * 3. If every per-comment add fails, delete the pending review (best-effort) and
- *    report no review created.
+ * Unified review creation helper (single batch attempt).
+ * Attempts batch creation with all prepared comments. On a 422 "line must be part of the diff"
+ * simply returns without creating a review.
  * @param {Object} params
  * @param {Octokit} params.octokit
  * @param {string} params.owner
@@ -451,51 +495,13 @@ async function createReview({
   comments,
 }) {
   const prContext = { owner, repo, pull_number }
-
-  /** Find any existing pending review (regardless of actor). */
-  async function findPendingReview() {
-    const listFn = /** @type {any} */ (octokit.pulls).listReviews
-    if (typeof listFn !== 'function') return null
-    try {
-      const { data: reviews } = await listFn({ ...prContext, per_page: 100 })
-      const pending = reviews.find((r) => r.state === 'PENDING')
-      debug(
-        `Reviews snapshot: ${
-          reviews
-            .map(
-              (r) =>
-                `${r.id}:${r.state}${r.user?.login ? '@' + r.user.login : ''}`
-            )
-            .join(', ') || 'none'
-        }`
-      )
-      if (pending) {
-        debug(
-          `findPendingReview: found pending review id=${pending.id} user=${pending.user?.login} (total reviews scanned: ${reviews.length})`
-        )
-        return pending.id
-      }
-      debug(
-        `findPendingReview: no pending review among ${reviews.length} reviews.`
-      )
-      return null
-    } catch (err) {
-      debug(
-        `Could not list reviews to detect existing pending review: ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      )
-      return null
-    }
-  }
-
-  /** Attempt to create a review with all comments (batch). */
-  async function createReviewWithComments() {
-    debug(
-      `Batch create attempt: ${
-        comments.length
-      } comments commit=${commit_id.slice(0, 7)} event=${event}`
-    )
+  debug(
+    `Batch create attempt: ${comments.length} comments commit=${commit_id.slice(
+      0,
+      7
+    )} event=${event}`
+  )
+  try {
     await octokit.pulls.createReview({
       ...prContext,
       commit_id,
@@ -504,441 +510,15 @@ async function createReview({
       comments,
     })
     debug('Batch create succeeded.')
-  }
-
-  /** Create a fresh pending review (no reuse or deletion logic here). */
-  async function createPendingReview() {
-    const created = await octokit.pulls.createReview({
-      ...prContext,
-      commit_id,
-      body,
-    })
-    debug(`Created pending review id=${created.data.id}`)
-    return created.data.id
-  }
-
-  async function snapshotReview(reviewId) {
-    try {
-      const res = await octokit.pulls.getReview({
-        ...prContext,
-        review_id: reviewId,
-      })
-      debug(
-        `Review snapshot id=${reviewId} state=${
-          res.data.state
-        } commit_id=${res.data.commit_id?.slice(0, 7)}`
-      )
-    } catch (e) {
-      debug(
-        `Review snapshot fetch failed id=${reviewId}: ${
-          e instanceof Error ? e.message : String(e)
-        }`
-      )
-    }
-  }
-
-  async function pathExistsInPR(path) {
-    try {
-      const files = (
-        await octokit.pulls.listFiles({ ...prContext, per_page: 300 })
-      ).data
-      return files.some((f) => f.filename === path)
-    } catch (e) {
-      debug(
-        `Could not list PR files for path existence: ${
-          e instanceof Error ? e.message : String(e)
-        }`
-      )
-      return true // assume true to avoid false negatives
-    }
-  }
-
-  /** Fetch specific line(s) of a file at the PR head commit for debugging anchor failures.
-   * Returns an array of { lineNumber, content } objects or empty array on failure.
-   * @param {string} path
-   * @param {number} start
-   * @param {number} end
-   * @returns {Promise<Array<{lineNumber:number,content:string}>>}
-   */
-  async function fetchFileLines(path, start, end) {
-    if (start > end) return []
-    try {
-      const res = await octokit.repos.getContent({
-        owner,
-        repo,
-        path,
-        ref: commit_id,
-      })
-      // @ts-ignore - octokit type union; ensure it's a file with content
-      if (!res.data || res.data.type !== 'file' || !res.data.content) return []
-      // @ts-ignore
-      const decoded = Buffer.from(
-        res.data.content,
-        res.data.encoding || 'base64'
-      ).toString('utf8')
-      const lines = decoded.split(/\r?\n/)
-      const slice = []
-      for (let i = start; i <= end; i++) {
-        const idx = i - 1
-        if (idx >= 0 && idx < lines.length) {
-          slice.push({ lineNumber: i, content: lines[idx] })
-        }
-      }
-      return slice
-    } catch (e) {
-      debug(
-        `Failed to fetch file content for debug ${path}:${start}-${end}: ${
-          e instanceof Error ? e.message : String(e)
-        }`
-      )
-      return []
-    }
-  }
-
-  /**
-   * Attempt to add a single review comment.
-   * Returns the created comment object on success, null if skipped due to the
-   * known 422 "line must be part of the diff" error, otherwise throws.
-   * @param {CreatedReview['id']} reviewId
-   * @param {ReviewCommentDraft} comment
-   * @returns {Promise<CreatedReviewComment | null>}
-   */
-  async function createReviewComment(reviewId, comment) {
-    const maxAttempts = 5
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        debugVerbose(
-          () =>
-            `Adding comment (attempt ${attempt}/${maxAttempts}) to review ${reviewId}: ${
-              comment.path
-            }:${formatLineRange(
-              comment.start_line,
-              comment.line
-            )} (body length ${comment.body.length})`
-        )
-        if (attempt === 1) {
-          await snapshotReview(reviewId)
-          const pathPresent = await pathExistsInPR(comment.path)
-          debugVerbose(
-            () =>
-              `Pre-add sanity: path ${
-                comment.path
-              } presentInPR=${pathPresent} commit_id=${commit_id.slice(0, 7)}`
-          )
-        }
-        const response = await octokit.request(
-          'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments',
-          (() => {
-            const params = {
-              ...prContext,
-              review_id: reviewId,
-              body: comment.body,
-              path: comment.path,
-              line: comment.line,
-              side: /** @type {'RIGHT'} */ ('RIGHT'),
-              ...(comment.start_line !== undefined && {
-                start_line: comment.start_line,
-                start_side: /** @type {'RIGHT'} */ ('RIGHT'),
-              }),
-            }
-            debugVerbose(
-              () =>
-                `Outgoing review comment request params: review=${reviewId} path=${
-                  comment.path
-                } start_line=${comment.start_line ?? ''} line=${
-                  comment.line
-                } commit=omitted has_start=${
-                  comment.start_line !== undefined
-                } bodyLen=${comment.body.length}`
-            )
-            return params
-          })()
-        )
-        return response.data
-      } catch (err) {
-        if (isLineOutsideDiffError(err)) {
-          // Enrich debug with actual file line content for the failed anchor
-          const start = comment.start_line ?? comment.line
-          ;(async () => {
-            const contextLines = await fetchFileLines(
-              comment.path,
-              start,
-              comment.line
-            )
-            debugVerbose(
-              () =>
-                `Anchor debug (line-outside-diff) for ${
-                  comment.path
-                }:${formatLineRange(comment.start_line, comment.line)} => ${
-                  contextLines.length
-                    ? contextLines
-                        .map((l) => `${l.lineNumber}: ${l.content}`)
-                        .join(' | ')
-                    : 'no file lines fetched'
-                }`
-            )
-          })()
-          info(
-            `Could not create suggestion (line outside PR diff) for ${
-              comment.path
-            }:${formatLineRange(comment.start_line, comment.line)}`
-          )
-          debugVerbose(
-            () =>
-              `Skipped invalid-line suggestion ${
-                comment.path
-              }:${formatLineRange(comment.start_line, comment.line)}`
-          )
-          return null
-        }
-        if (err instanceof RequestError && err.status === 404) {
-          // Log the raw 404 error details (once per attempt) for diagnostics
-          try {
-            const anyErr = /** @type {any} */ (err)
-            const resp = anyErr.response || {}
-            const headers = resp.headers || {}
-            const data = resp.data || {}
-            debug(
-              `404 error detail attempt=${attempt} target=${
-                comment.path
-              }:${formatLineRange(comment.start_line, comment.line)} status=${
-                anyErr.status
-              } message=${anyErr.message}${
-                data && data.message ? ` apiMessage=${data.message}` : ''
-              } requestId=${headers['x-github-request-id'] || 'n/a'}`
-            )
-            debugVerbose(() => {
-              const interestingHeaders = [
-                'x-ratelimit-remaining',
-                'x-ratelimit-reset',
-                'x-github-enterprise-version',
-              ]
-                .map((h) => `${h}=${headers[h] ?? 'n/a'}`)
-                .join(' ')
-              const payload = safeJson(data)
-              const truncatedPayload =
-                payload && payload.length > 1200
-                  ? payload.slice(0, 1200) + '…(truncated)'
-                  : payload
-              return `404 extended debug target=${
-                comment.path
-              }:${formatLineRange(
-                comment.start_line,
-                comment.line
-              )} review=${reviewId} commit=${commit_id.slice(
-                0,
-                7
-              )} start_line=${comment.start_line ?? ''} line=${
-                comment.line
-              } headers{${interestingHeaders}} payload=${truncatedPayload}`
-            })
-          } catch {
-            /* ignore structured logging issues */
-          }
-          if (attempt === 1) {
-            // Fetch and log the target line content at first 404 for added clarity
-            const start = comment.start_line ?? comment.line
-            const lines = await fetchFileLines(
-              comment.path,
-              start,
-              comment.line
-            )
-            debugVerbose(
-              () =>
-                `Anchor debug (404) for ${comment.path}:${formatLineRange(
-                  comment.start_line,
-                  comment.line
-                )} => ${
-                  lines.length
-                    ? lines
-                        .map((l) => `${l.lineNumber}: ${l.content}`)
-                        .join(' | ')
-                    : 'no file lines fetched'
-                }`
-            )
-          }
-          // Distinguish transient propagation vs stale review disappearance.
-          try {
-            const { data: reviews } = await /** @type {any} */ (
-              octokit.pulls
-            ).listReviews({
-              ...prContext,
-              per_page: 100,
-            })
-            const stillThere = reviews.some(
-              (r) => r.id === reviewId && r.state === 'PENDING'
-            )
-            debugVerbose(
-              () =>
-                `404 diagnostic: target=${comment.path}:${formatLineRange(
-                  comment.start_line,
-                  comment.line
-                )} stillThere=${stillThere} reviewsCount=${reviews.length}`
-            )
-            if (stillThere && attempt < maxAttempts) {
-              const delay = 150 * attempt
-              debug(
-                `404 adding comment ${comment.path}:${formatLineRange(
-                  comment.start_line,
-                  comment.line
-                )} to pending review ${reviewId} (attempt ${attempt}); review still listed as PENDING. Retrying after ${delay}ms.`
-              )
-              await new Promise((r) => setTimeout(r, delay))
-              continue
-            }
-            if (!stillThere) {
-              debug(
-                `404 adding comment ${comment.path}:${formatLineRange(
-                  comment.start_line,
-                  comment.line
-                )}: pending review ${reviewId} no longer present (considered stale) after attempt ${attempt}.`
-              )
-            } else if (attempt >= maxAttempts) {
-              debug(
-                `404 adding comment ${comment.path}:${formatLineRange(
-                  comment.start_line,
-                  comment.line
-                )} persists after ${attempt} attempts; giving up on this anchor and skipping it (treating as invalid anchor).`
-              )
-              return null
-            }
-          } catch (listErr) {
-            debug(
-              `Failed to list reviews after 404 on review ${reviewId}: ${
-                listErr instanceof Error ? listErr.message : String(listErr)
-              }`
-            )
-          }
-          // Only propagate if review vanished; otherwise we either retried or skipped.
-          if (attempt === maxAttempts) {
-            // If we reached here and didn't return null, treat as stale and throw to outer handler.
-            throw err
-          }
-        }
-        debug(
-          `Error creating comment on review ${reviewId} (attempt ${attempt}): ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        )
-        throw err
-      }
-    }
-    // Should not reach here; return null for type safety.
-    return null
-  }
-
-  /** Delete a pending review.
-   * @param {CreatedReview['id']} review_id
-   * @returns {Promise<void>}
-   */
-  async function deletePendingReview(review_id) {
-    try {
-      await octokit.pulls.deletePendingReview({ ...prContext, review_id })
-    } catch (err) {
-      debug(
-        `Failed to delete pending review ${review_id}: ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      )
-    }
-  }
-
-  /** Delete all pending reviews for a clean slate at start. */
-  async function deleteAllPendingReviews() {
-    const listFn = /** @type {any} */ (octokit.pulls).listReviews
-    if (typeof listFn !== 'function') return
-    try {
-      const { data: reviews } = await listFn({ ...prContext, per_page: 100 })
-      const pending = reviews.filter((r) => r.state === 'PENDING')
-      if (pending.length) {
-        debug(
-          `Deleting ${pending.length} existing pending review(s) before starting.`
-        )
-      } else {
-        debug('No existing pending reviews to delete.')
-      }
-      for (const r of pending) {
-        debug(`Deleting pending review id=${r.id} user=${r.user?.login}`)
-        await deletePendingReview(r.id)
-      }
-    } catch (e) {
-      debug(
-        `Unable to list reviews for cleanup: ${
-          e instanceof Error ? e.message : String(e)
-        }`
-      )
-    }
-  }
-
-  try {
-    // Always start clean: delete any existing pending reviews first.
-    await deleteAllPendingReviews()
-    await createReviewWithComments()
     return { comments, reviewCreated: true }
   } catch (err) {
-    if (!isLineOutsideDiffError(err) && !isDuplicatePendingReviewError(err))
-      throw err
-    debug(
-      isLineOutsideDiffError(err)
-        ? 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
-        : 'Batch review creation failed (422: one pending review per pull request) even after cleanup; attempting forced fresh pending salvage.'
-    )
-    if (err instanceof Error) {
-      debug(`Batch failure detail: ${err.message}`)
-    }
-    if (isDuplicatePendingReviewError(err)) {
-      // Cleanup again & attempt fresh pending salvage.
-      await deleteAllPendingReviews()
-      const reviewId = await createPendingReview()
-      let added = 0
-      let skipped = 0
-      for (const comment of comments) {
-        const created = await createReviewComment(reviewId, comment)
-        if (created) added++
-        else skipped++
-      }
+    if (isLineOutsideDiffError(err)) {
       debug(
-        `Duplicate salvage after forced cleanup into pending review ${reviewId} added=${added} skipped=${skipped}`
+        'Batch review creation failed (422: line must be part of the diff). Returning without review.'
       )
-      if (added === 0) {
-        await deletePendingReview(reviewId)
-        return { comments: [], reviewCreated: false }
-      }
-      await octokit.pulls.submitReview({
-        ...prContext,
-        review_id: reviewId,
-        body,
-        event,
-      })
-      return { comments, reviewCreated: true }
-    }
-    // line-outside-diff salvage path
-    const reviewId = await createPendingReview()
-    let added = 0
-    let skipped = 0
-    for (const comment of comments) {
-      const created = await createReviewComment(reviewId, comment)
-      if (created) added++
-      else skipped++
-    }
-    debug(
-      `Line-outside-diff salvage into new pending review id=${reviewId} added=${added} skipped=${skipped}`
-    )
-    if (added === 0) {
-      debug(
-        'No review comments could be added; pending review will not be submitted.'
-      )
-      await deletePendingReview(reviewId)
       return { comments: [], reviewCreated: false }
     }
-    await octokit.pulls.submitReview({
-      ...prContext,
-      review_id: reviewId,
-      body,
-      event,
-    })
-    debug(`Submitted salvage review (added: ${added}, skipped: ${skipped}).`)
-    return { comments, reviewCreated: true }
+    throw err
   }
 }
 
