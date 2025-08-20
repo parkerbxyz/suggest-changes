@@ -351,9 +351,9 @@ export async function run({
   // Parse diff after collecting existing comment keys
   const parsedDiff = parseGitDiff(diff)
 
-  const comments = generateReviewComments(parsedDiff, existingCommentKeys)
+  let comments = generateReviewComments(parsedDiff, existingCommentKeys)
   // PR diff canonical filtering: fetch server-side diff, ensure anchors exist on RIGHT side there.
-  await pruneSuggestionsNotInPRDiff({
+  comments = await filterSuggestionsInPullRequestDiff({
     octokit,
     owner,
     repo,
@@ -362,15 +362,16 @@ export async function run({
   })
   /**
    * Filters suggestion comments using the canonical server-side PR diff.
-   * Mutates the comments array in place, removing invalid suggestions and logging summary info.
+   * Returns a new array containing only valid suggestions and logs summary info.
    * @param {Object} params
    * @param {Octokit} params.octokit
    * @param {string} params.owner
    * @param {string} params.repo
    * @param {number} params.pull_number
    * @param {Array<ReviewCommentDraft>} params.comments
+   * @returns {Promise<Array<ReviewCommentDraft>>}
    */
-  async function pruneSuggestionsNotInPRDiff({
+  async function filterSuggestionsInPullRequestDiff({
     octokit,
     owner,
     repo,
@@ -378,100 +379,81 @@ export async function run({
     comments,
   }) {
     try {
-      if (typeof (/** @type {any} */ (octokit).request) !== 'function') return
-      const prDiffResp = await /** @type {any} */ (octokit).request(
-        'GET /repos/{owner}/{repo}/pulls/{pull_number}',
-        {
-          owner,
-          repo,
-          pull_number,
-          headers: { accept: 'application/vnd.github.v3.diff' },
-        }
+      const pullRequestDiff = /** @type {string} */ (
+        await /** @type {any} */ (octokit).request(
+          'GET /repos/{owner}/{repo}/pulls/{pull_number}',
+          {
+            owner,
+            repo,
+            pull_number,
+            headers: { accept: 'application/vnd.github.v3.diff' },
+          }
+        )
       )
-      const prDiffText =
-        prDiffResp && typeof prDiffResp.data === 'string'
-          ? prDiffResp.data
-          : null
-      if (!prDiffText || !prDiffText.startsWith('diff --git')) {
+      if (!pullRequestDiff || !pullRequestDiff.startsWith('diff --git')) {
         debug(
           'PR diff filter: unexpected server diff format; skipping canonical filtering.'
         )
-        return
+        return comments
       }
-      const prParsed = parseGitDiff(prDiffText)
+      const parsedPullRequestDiff = parseGitDiff(pullRequestDiff)
       /** @type {Record<string, Set<number>>} */
-      const validRightLines = {}
-      for (const file of prParsed.files) {
-        if (file.type !== 'ChangedFile') continue
-        const set = new Set()
-        for (const chunk of file.chunks) {
-          if (chunk.type !== 'Chunk') continue
-          for (const ch of chunk.changes) {
-            if (isAddedLine(ch) || isUnchangedLine(ch)) set.add(ch.lineAfter)
-          }
-        }
-        validRightLines[file.path] = set
-      }
-      const initialCount = comments.length
-      let kept = 0
-      let skippedAnchors = 0
-      /** @type {Set<string>} */
-      const missingFiles = new Set()
-      for (let i = comments.length - 1; i >= 0; i--) {
-        const c = comments[i]
-        const set = validRightLines[c.path]
-        if (!set) {
-          debug(
-            `Skipping suggestion (file missing) ${c.path}:${formatLineRange(
-              c.start_line,
-              c.line
-            )}`
-          )
-          comments.splice(i, 1)
-          missingFiles.add(c.path)
-          continue
-        }
-        const lineOk = set.has(c.line)
-        const startOk = c.start_line === undefined || set.has(c.start_line)
-        if (lineOk && startOk) {
-          kept++
-          continue
-        }
-        debug(
-          `Skipping suggestion (invalid anchor) ${c.path}:${formatLineRange(
-            c.start_line,
-            c.line
-          )}`
-        )
-        comments.splice(i, 1)
-        skippedAnchors++
-      }
-      if (initialCount > 0) {
-        const plural = (n) => (n === 1 ? '' : 's')
-        info(
-          `Prepared ${kept} suggestion${plural(
-            kept
-          )} for review (from ${initialCount} initial).`
-        )
-        if (skippedAnchors > 0) {
-          info(
-            `Skipped ${skippedAnchors} suggestion${plural(
-              skippedAnchors
-            )} because line(s) are not part of the pull request diff.`
-          )
-        }
-        if (missingFiles.size > 0) {
-          info(
-            `Skipped suggestions in ${missingFiles.size} file${plural(
-              missingFiles.size
-            )} that are not part of the pull request.`
-          )
-        }
-      }
-    } catch (e) {
-      debug(
-        `PR diff filter failed: ${e instanceof Error ? e.message : String(e)}`
+      const validRightLines = Object.fromEntries(
+        parsedPullRequestDiff.files
+          .filter((file) => file.type === 'ChangedFile')
+          .map((file) => [
+            file.path,
+            new Set(
+              file.chunks
+                .filter((chunk) => chunk.type === 'Chunk')
+                .flatMap((chunk) =>
+                  chunk.changes
+                    .filter(
+                      (change) => isAddedLine(change) || isUnchangedLine(change)
+                    )
+                    .map((change) => change.lineAfter)
+                )
+            ),
+          ])
       )
+      const initialSuggestionCount = comments.length
+      const validSuggestions = comments.filter((comment) => {
+        const validLines = validRightLines[comment.path]
+        const isValid =
+          !!validLines &&
+          validLines.has(comment.line) &&
+          (comment.start_line === undefined ||
+            validLines.has(comment.start_line))
+        if (!isValid) {
+          debug(
+            `Skipping suggestion because it is not part of the pull request diff:) ${
+              comment.path
+            }:${formatLineRange(comment.start_line, comment.line)}`
+          )
+        }
+        return isValid
+      })
+      const validSuggestionCount = validSuggestions.length
+      const invalidSuggestionCount =
+        initialSuggestionCount - validSuggestionCount
+      if (initialSuggestionCount > 0) {
+        debug(
+          `Number of valid suggestions: ${validSuggestionCount} of ${initialSuggestionCount}.`
+        )
+        if (invalidSuggestionCount > 0) {
+          info(
+            `Number of suggestions skipped because they are not part of the pull request diff: ${invalidSuggestionCount} of ${initialSuggestionCount}`
+          )
+        }
+      }
+      return validSuggestions
+    } catch (err) {
+      debug(
+        `PR diff filter failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      )
+      return comments
     }
   }
   debug(
