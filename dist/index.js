@@ -59092,6 +59092,24 @@ function formatLineRange(startLine, line) {
 }
 
 /**
+ * Extra verbose debug logging (enabled when either ACTIONS_STEP_DEBUG plus SUGGEST_CHANGES_VERBOSE=true or SUGGEST_CHANGES_DEBUG=true).
+ * Wrap expensive string building in a function so we only compute when needed.
+ * @param {() => string} msgFn
+ */
+function debugVerbose(msgFn) {
+  if (
+    process.env.SUGGEST_CHANGES_VERBOSE === 'true' ||
+    process.env.SUGGEST_CHANGES_DEBUG === 'true'
+  ) {
+    try {
+      (0,core.debug)(msgFn())
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
  * Returns true for the known 422 "line must be part of the diff" validation failure.
  * Strictly requires an Octokit RequestError so unrelated errors are rethrown.
  * @param {unknown} err
@@ -59361,6 +59379,16 @@ async function run({
   const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 
   const comments = generateReviewComments(parsedDiff, existingCommentKeys)
+  ;(0,core.debug)(
+    `Prepared ${comments.length} new suggestion comments (existing review comments: ${existingComments.length}).`
+  )
+  if (comments.length) {
+    const sample = comments
+      .slice(0, 8)
+      .map((c) => `${c.path}:${formatLineRange(c.start_line, c.line)}`)
+      .join(', ')
+    ;(0,core.debug)(`Sample targets (first up to 8): ${sample}`)
+  }
   if (comments.length === 0) {
     return { comments: [], reviewCreated: false }
   }
@@ -59438,6 +59466,12 @@ async function createReview({
 
   /** Attempt to create a review with all comments (batch). */
   async function createReviewWithComments() {
+    (0,core.debug)(
+      `Batch create attempt: ${comments.length} comments commit=${commit_id.slice(
+        0,
+        7
+      )} event=${event}`
+    )
     await octokit.pulls.createReview({
       ...prContext,
       commit_id,
@@ -59445,6 +59479,7 @@ async function createReview({
       event,
       comments,
     })
+    ;(0,core.debug)('Batch create succeeded.')
   }
 
   /** Create a fresh pending review (no reuse or deletion logic here). */
@@ -59454,6 +59489,7 @@ async function createReview({
       commit_id,
       body,
     })
+  ;(0,core.debug)(`Created pending review id=${created.data.id}`)
     return created.data.id
   }
 
@@ -59467,6 +59503,13 @@ async function createReview({
    */
   async function createReviewComment(reviewId, comment) {
     try {
+      debugVerbose(
+        () =>
+          `Adding comment to review ${reviewId}: ${comment.path}:${formatLineRange(
+            comment.start_line,
+            comment.line
+          )} (body length ${comment.body.length})`
+      )
       const response = await octokit.request(
         'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments',
         {
@@ -59491,8 +59534,20 @@ async function createReview({
             comment.path
           }:${formatLineRange(comment.start_line, comment.line)}`
         )
+        debugVerbose(
+          () =>
+            `Skipped invalid-line suggestion ${comment.path}:${formatLineRange(
+              comment.start_line,
+              comment.line
+            )}`
+        )
         return null
       }
+      (0,core.debug)(
+        `Error creating comment on review ${reviewId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      )
       throw err
     }
   }
@@ -59527,6 +59582,9 @@ async function createReview({
           if (created) added++
           else skipped++
         }
+        (0,core.debug)(
+          `Salvage into existing pending review id=${existingPendingId} added=${added} skipped=${skipped}`
+        )
         if (added === 0) {
           (0,core.debug)(
             'Existing pending review received no new comments; leaving it unsubmitted.'
@@ -59554,6 +59612,9 @@ async function createReview({
           ? 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
           : 'Batch review creation failed (422: one pending review per pull request). Reusing existing pending review if present.'
       )
+      if (err instanceof Error) {
+        (0,core.debug)(`Batch failure detail: ${err.message}`)
+      }
       if (isDuplicatePendingReviewError(err)) {
         // Retry a few times to locate the pending review (eventual consistency or race).
         let existingPendingId = await findPendingReview()
@@ -59577,6 +59638,9 @@ async function createReview({
             if (created) added++
             else skipped++
           }
+          (0,core.debug)(
+            `Duplicate salvage into existing pending review id=${existingPendingId} added=${added} skipped=${skipped}`
+          )
           if (added === 0) {
             (0,core.debug)(
               'Duplicate path reuse: no comments added; not submitting existing pending review.'
@@ -59607,6 +59671,9 @@ async function createReview({
       if (created) added++
       else skipped++
     }
+    (0,core.debug)(
+      `Line-outside-diff salvage into new pending review id=${reviewId} added=${added} skipped=${skipped}`
+    )
     if (added === 0) {
       (0,core.debug)(
         'No review comments could be added; pending review will not be submitted.'
