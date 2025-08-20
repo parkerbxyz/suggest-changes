@@ -59219,7 +59219,7 @@ const generateSuggestionBody = (changes) => {
   const { addedLines, deletedLines, unchangedLines } =
     filterChangesByType(changes)
 
-  // No additions means no content to suggest, except for pure deletions
+  // No additions means no content to suggest, except for pure deletions (empty replacement block)
   if (addedLines.length === 0) {
     return deletedLines.length > 0
       ? { body: createSuggestion(''), lineCount: deletedLines.length }
@@ -59742,13 +59742,14 @@ async function createReview({
                     comment.line
                   )}: pending review ${reviewId} no longer present (considered stale) after attempt ${attempt}.`
                 )
-              } else {
+              } else if (attempt >= maxAttempts) {
                 (0,core.debug)(
                   `404 adding comment ${comment.path}:${formatLineRange(
                     comment.start_line,
                     comment.line
-                  )} persists after ${attempt} attempts; treating review ${reviewId} as stale.`
+                  )} persists after ${attempt} attempts; giving up on this anchor and skipping it (treating as invalid anchor).`
                 )
+                return null
               }
             } catch (listErr) {
               (0,core.debug)(
@@ -59757,8 +59758,11 @@ async function createReview({
                 }`
               )
             }
-          // Propagate 404 to caller to trigger stale handling.
-          throw err
+          // Only propagate if review vanished; otherwise we either retried or skipped.
+          if (attempt === maxAttempts) {
+            // If we reached here and didn't return null, treat as stale and throw to outer handler.
+            throw err
+          }
         }
         (0,core.debug)(
           `Error creating comment on review ${reviewId} (attempt ${attempt}): ${
