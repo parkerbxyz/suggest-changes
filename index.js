@@ -515,54 +515,96 @@ async function createReview({
    * @returns {Promise<CreatedReviewComment | null>}
    */
   async function createReviewComment(reviewId, comment) {
-    try {
-      debugVerbose(
-        () =>
-          `Adding comment to review ${reviewId}: ${comment.path}:${formatLineRange(
-            comment.start_line,
-            comment.line
-          )} (body length ${comment.body.length})`
-      )
-      const response = await octokit.request(
-        'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments',
-        {
-          ...prContext,
-          review_id: reviewId,
-          commit_id,
-          body: comment.body,
-          path: comment.path,
-          line: comment.line,
-          side: /** @type {'RIGHT'} */ ('RIGHT'),
-          ...(comment.start_line !== undefined && {
-            start_line: comment.start_line,
-            start_side: /** @type {'RIGHT'} */ ('RIGHT'),
-          }),
-        }
-      )
-      return response.data
-    } catch (err) {
-      if (isLineOutsideDiffError(err)) {
-        info(
-          `Could not create suggestion (line outside PR diff) for ${
-            comment.path
-          }:${formatLineRange(comment.start_line, comment.line)}`
-        )
+    const maxAttempts = 5
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
         debugVerbose(
           () =>
-            `Skipped invalid-line suggestion ${comment.path}:${formatLineRange(
+            `Adding comment (attempt ${attempt}/${maxAttempts}) to review ${reviewId}: ${comment.path}:${formatLineRange(
               comment.start_line,
               comment.line
-            )}`
+            )} (body length ${comment.body.length})`
         )
-        return null
+        const response = await octokit.request(
+          'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments',
+          {
+            ...prContext,
+            review_id: reviewId,
+            commit_id,
+            body: comment.body,
+            path: comment.path,
+            line: comment.line,
+            side: /** @type {'RIGHT'} */ ('RIGHT'),
+            ...(comment.start_line !== undefined && {
+              start_line: comment.start_line,
+              start_side: /** @type {'RIGHT'} */ ('RIGHT'),
+            }),
+          }
+        )
+        return response.data
+      } catch (err) {
+        if (isLineOutsideDiffError(err)) {
+          info(
+            `Could not create suggestion (line outside PR diff) for ${
+              comment.path
+            }:${formatLineRange(comment.start_line, comment.line)}`
+          )
+          debugVerbose(
+            () =>
+              `Skipped invalid-line suggestion ${comment.path}:${formatLineRange(
+                comment.start_line,
+                comment.line
+              )}`
+          )
+          return null
+        }
+        if (err instanceof RequestError && err.status === 404) {
+          // Distinguish transient propagation vs stale review disappearance.
+            try {
+              const { data: reviews } = await /** @type {any} */ (octokit.pulls).listReviews({
+                ...prContext,
+                per_page: 100,
+              })
+              const stillThere = reviews.some(
+                (r) => r.id === reviewId && r.state === 'PENDING'
+              )
+              if (stillThere && attempt < maxAttempts) {
+                const delay = 150 * attempt
+                debug(
+                  `404 adding comment to pending review ${reviewId} (attempt ${attempt}); review still listed as PENDING. Retrying after ${delay}ms.`
+                )
+                await new Promise((r) => setTimeout(r, delay))
+                continue
+              }
+              if (!stillThere) {
+                debug(
+                  `404 adding comment: pending review ${reviewId} no longer present (considered stale) after attempt ${attempt}.`
+                )
+              } else {
+                debug(
+                  `404 adding comment persists after ${attempt} attempts; treating review ${reviewId} as stale.`
+                )
+              }
+            } catch (listErr) {
+              debug(
+                `Failed to list reviews after 404 on review ${reviewId}: ${
+                  listErr instanceof Error ? listErr.message : String(listErr)
+                }`
+              )
+            }
+          // Propagate 404 to caller to trigger stale handling.
+          throw err
+        }
+        debug(
+          `Error creating comment on review ${reviewId} (attempt ${attempt}): ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        )
+        throw err
       }
-      debug(
-        `Error creating comment on review ${reviewId}: ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      )
-      throw err
     }
+  // Should not reach here; return null for type safety.
+  return null
   }
 
   /** Delete a pending review.
