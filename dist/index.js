@@ -59221,9 +59221,10 @@ const generateSuggestionBody = (changes) => {
 
   // No additions means no content to suggest, except for pure deletions (empty replacement block)
   if (addedLines.length === 0) {
-    return deletedLines.length > 0
-      ? { body: createSuggestion(''), lineCount: deletedLines.length }
-      : null
+    if (deletedLines.length === 0) return null
+    // Default behavior: include pure deletion suggestions unless explicitly skipped
+    if (process.env.SUGGEST_CHANGES_SKIP_PURE_DELETIONS === 'true') return null
+    return { body: createSuggestion(''), lineCount: deletedLines.length }
   }
 
   // Pure additions: include context if available
@@ -59379,12 +59380,13 @@ async function run({
 }) {
   ;(0,core.debug)(`Diff output: ${diff}`)
 
-  const parsedDiff = mjs(diff)
-
   const existingComments = (
     await octokit.pulls.listReviewComments({ owner, repo, pull_number })
   ).data
   const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
+
+  // Parse diff after collecting existing comment keys
+  const parsedDiff = mjs(diff)
 
   const comments = generateReviewComments(parsedDiff, existingCommentKeys)
   ;(0,core.debug)(
@@ -59430,7 +59432,7 @@ async function run({
  * @param {string} params.commit_id
  * @param {string} params.body
  * @param {ReviewEvent} params.event
- * @param {Array} params.comments
+ * @param {Array} params.comments original comment objects (line/start_line form)
  * @returns {Promise<{comments: Array, reviewCreated: boolean}>}
  */
 async function createReview({
@@ -59453,12 +59455,14 @@ async function createReview({
       const { data: reviews } = await listFn({ ...prContext, per_page: 100 })
       const pending = reviews.find((r) => r.state === 'PENDING')
       ;(0,core.debug)(
-        `Reviews snapshot: ${reviews
-          .map(
-            (r) =>
-              `${r.id}:${r.state}${r.user?.login ? '@' + r.user.login : ''}`
-          )
-          .join(', ') || 'none'}`
+        `Reviews snapshot: ${
+          reviews
+            .map(
+              (r) =>
+                `${r.id}:${r.state}${r.user?.login ? '@' + r.user.login : ''}`
+            )
+            .join(', ') || 'none'
+        }`
       )
       if (pending) {
         (0,core.debug)(
@@ -59483,10 +59487,9 @@ async function createReview({
   /** Attempt to create a review with all comments (batch). */
   async function createReviewWithComments() {
     (0,core.debug)(
-      `Batch create attempt: ${comments.length} comments commit=${commit_id.slice(
-        0,
-        7
-      )} event=${event}`
+      `Batch create attempt: ${
+        comments.length
+      } comments commit=${commit_id.slice(0, 7)} event=${event}`
     )
     await octokit.pulls.createReview({
       ...prContext,
@@ -59505,15 +59508,20 @@ async function createReview({
       commit_id,
       body,
     })
-  ;(0,core.debug)(`Created pending review id=${created.data.id}`)
+    ;(0,core.debug)(`Created pending review id=${created.data.id}`)
     return created.data.id
   }
 
   async function snapshotReview(reviewId) {
     try {
-      const res = await octokit.pulls.getReview({ ...prContext, review_id: reviewId })
+      const res = await octokit.pulls.getReview({
+        ...prContext,
+        review_id: reviewId,
+      })
       ;(0,core.debug)(
-        `Review snapshot id=${reviewId} state=${res.data.state} commit_id=${res.data.commit_id?.slice(0,7)}`
+        `Review snapshot id=${reviewId} state=${
+          res.data.state
+        } commit_id=${res.data.commit_id?.slice(0, 7)}`
       )
     } catch (e) {
       (0,core.debug)(
@@ -59559,7 +59567,10 @@ async function createReview({
       // @ts-ignore - octokit type union; ensure it's a file with content
       if (!res.data || res.data.type !== 'file' || !res.data.content) return []
       // @ts-ignore
-      const decoded = Buffer.from(res.data.content, res.data.encoding || 'base64').toString('utf8')
+      const decoded = Buffer.from(
+        res.data.content,
+        res.data.encoding || 'base64'
+      ).toString('utf8')
       const lines = decoded.split(/\r?\n/)
       const slice = []
       for (let i = start; i <= end; i++) {
@@ -59593,7 +59604,9 @@ async function createReview({
       try {
         debugVerbose(
           () =>
-            `Adding comment (attempt ${attempt}/${maxAttempts}) to review ${reviewId}: ${comment.path}:${formatLineRange(
+            `Adding comment (attempt ${attempt}/${maxAttempts}) to review ${reviewId}: ${
+              comment.path
+            }:${formatLineRange(
               comment.start_line,
               comment.line
             )} (body length ${comment.body.length})`
@@ -59603,10 +59616,9 @@ async function createReview({
           const pathPresent = await pathExistsInPR(comment.path)
           debugVerbose(
             () =>
-              `Pre-add sanity: path ${comment.path} presentInPR=${pathPresent} commit_id=${commit_id.slice(
-                0,
-                7
-              )}`
+              `Pre-add sanity: path ${
+                comment.path
+              } presentInPR=${pathPresent} commit_id=${commit_id.slice(0, 7)}`
           )
         }
         const response = await octokit.request(
@@ -59625,8 +59637,15 @@ async function createReview({
                 start_side: /** @type {'RIGHT'} */ ('RIGHT'),
               }),
             }
-            debugVerbose(() =>
-              `Outgoing review comment request params: review=${reviewId} path=${comment.path} start_line=${comment.start_line ?? ''} line=${comment.line} commit=${commit_id.slice(0,7)} has_start=${comment.start_line !== undefined} bodyLen=${comment.body.length}`
+            debugVerbose(
+              () =>
+                `Outgoing review comment request params: review=${reviewId} path=${
+                  comment.path
+                } start_line=${comment.start_line ?? ''} line=${
+                  comment.line
+                } commit=${commit_id.slice(0, 7)} has_start=${
+                  comment.start_line !== undefined
+                } bodyLen=${comment.body.length}`
             )
             return params
           })()
@@ -59636,22 +59655,25 @@ async function createReview({
         if (isLineOutsideDiffError(err)) {
           // Enrich debug with actual file line content for the failed anchor
           const start = comment.start_line ?? comment.line
-            ;(async () => {
-              const contextLines = await fetchFileLines(comment.path, start, comment.line)
-              debugVerbose(
-                () =>
-                  `Anchor debug (line-outside-diff) for ${comment.path}:${formatLineRange(
-                    comment.start_line,
-                    comment.line
-                  )} => ${
-                    contextLines.length
-                      ? contextLines
-                          .map((l) => `${l.lineNumber}: ${l.content}`)
-                          .join(' | ')
-                      : 'no file lines fetched'
-                  }`
-              )
-            })()
+          ;(async () => {
+            const contextLines = await fetchFileLines(
+              comment.path,
+              start,
+              comment.line
+            )
+            debugVerbose(
+              () =>
+                `Anchor debug (line-outside-diff) for ${
+                  comment.path
+                }:${formatLineRange(comment.start_line, comment.line)} => ${
+                  contextLines.length
+                    ? contextLines
+                        .map((l) => `${l.lineNumber}: ${l.content}`)
+                        .join(' | ')
+                    : 'no file lines fetched'
+                }`
+            )
+          })()
           ;(0,core.info)(
             `Could not create suggestion (line outside PR diff) for ${
               comment.path
@@ -59659,10 +59681,9 @@ async function createReview({
           )
           debugVerbose(
             () =>
-              `Skipped invalid-line suggestion ${comment.path}:${formatLineRange(
-                comment.start_line,
-                comment.line
-              )}`
+              `Skipped invalid-line suggestion ${
+                comment.path
+              }:${formatLineRange(comment.start_line, comment.line)}`
           )
           return null
         }
@@ -59674,26 +59695,50 @@ async function createReview({
             const headers = resp.headers || {}
             const data = resp.data || {}
             ;(0,core.debug)(
-              `404 error detail attempt=${attempt} target=${comment.path}:${formatLineRange(
-                comment.start_line,
-                comment.line
-              )} status=${anyErr.status} message=${anyErr.message}${
+              `404 error detail attempt=${attempt} target=${
+                comment.path
+              }:${formatLineRange(comment.start_line, comment.line)} status=${
+                anyErr.status
+              } message=${anyErr.message}${
                 data && data.message ? ` apiMessage=${data.message}` : ''
               } requestId=${headers['x-github-request-id'] || 'n/a'}`
             )
             debugVerbose(() => {
-              const interestingHeaders = ['x-ratelimit-remaining', 'x-ratelimit-reset', 'x-github-enterprise-version']
+              const interestingHeaders = [
+                'x-ratelimit-remaining',
+                'x-ratelimit-reset',
+                'x-github-enterprise-version',
+              ]
                 .map((h) => `${h}=${headers[h] ?? 'n/a'}`)
                 .join(' ')
               const payload = safeJson(data)
-              const truncatedPayload = payload && payload.length > 1200 ? payload.slice(0, 1200) + '…(truncated)' : payload
-              return `404 extended debug target=${comment.path}:${formatLineRange(comment.start_line, comment.line)} review=${reviewId} commit=${commit_id.slice(0,7)} start_line=${comment.start_line ?? ''} line=${comment.line} headers{${interestingHeaders}} payload=${truncatedPayload}`
+              const truncatedPayload =
+                payload && payload.length > 1200
+                  ? payload.slice(0, 1200) + '…(truncated)'
+                  : payload
+              return `404 extended debug target=${
+                comment.path
+              }:${formatLineRange(
+                comment.start_line,
+                comment.line
+              )} review=${reviewId} commit=${commit_id.slice(
+                0,
+                7
+              )} start_line=${comment.start_line ?? ''} line=${
+                comment.line
+              } headers{${interestingHeaders}} payload=${truncatedPayload}`
             })
-          } catch {/* ignore structured logging issues */}
+          } catch {
+            /* ignore structured logging issues */
+          }
           if (attempt === 1) {
             // Fetch and log the target line content at first 404 for added clarity
             const start = comment.start_line ?? comment.line
-            const lines = await fetchFileLines(comment.path, start, comment.line)
+            const lines = await fetchFileLines(
+              comment.path,
+              start,
+              comment.line
+            )
             debugVerbose(
               () =>
                 `Anchor debug (404) for ${comment.path}:${formatLineRange(
@@ -59709,55 +59754,57 @@ async function createReview({
             )
           }
           // Distinguish transient propagation vs stale review disappearance.
-            try {
-              const { data: reviews } = await /** @type {any} */ (octokit.pulls).listReviews({
-                ...prContext,
-                per_page: 100,
-              })
-              const stillThere = reviews.some(
-                (r) => r.id === reviewId && r.state === 'PENDING'
+          try {
+            const { data: reviews } = await /** @type {any} */ (
+              octokit.pulls
+            ).listReviews({
+              ...prContext,
+              per_page: 100,
+            })
+            const stillThere = reviews.some(
+              (r) => r.id === reviewId && r.state === 'PENDING'
+            )
+            debugVerbose(
+              () =>
+                `404 diagnostic: target=${comment.path}:${formatLineRange(
+                  comment.start_line,
+                  comment.line
+                )} stillThere=${stillThere} reviewsCount=${reviews.length}`
+            )
+            if (stillThere && attempt < maxAttempts) {
+              const delay = 150 * attempt
+              ;(0,core.debug)(
+                `404 adding comment ${comment.path}:${formatLineRange(
+                  comment.start_line,
+                  comment.line
+                )} to pending review ${reviewId} (attempt ${attempt}); review still listed as PENDING. Retrying after ${delay}ms.`
               )
-              debugVerbose(
-                () =>
-                  `404 diagnostic: target=${comment.path}:${formatLineRange(
-                    comment.start_line,
-                    comment.line
-                  )} stillThere=${stillThere} reviewsCount=${reviews.length}`
-              )
-              if (stillThere && attempt < maxAttempts) {
-                const delay = 150 * attempt
-                ;(0,core.debug)(
-                  `404 adding comment ${comment.path}:${formatLineRange(
-                    comment.start_line,
-                    comment.line
-                  )} to pending review ${reviewId} (attempt ${attempt}); review still listed as PENDING. Retrying after ${delay}ms.`
-                )
-                await new Promise((r) => setTimeout(r, delay))
-                continue
-              }
-              if (!stillThere) {
-                (0,core.debug)(
-                  `404 adding comment ${comment.path}:${formatLineRange(
-                    comment.start_line,
-                    comment.line
-                  )}: pending review ${reviewId} no longer present (considered stale) after attempt ${attempt}.`
-                )
-              } else if (attempt >= maxAttempts) {
-                (0,core.debug)(
-                  `404 adding comment ${comment.path}:${formatLineRange(
-                    comment.start_line,
-                    comment.line
-                  )} persists after ${attempt} attempts; giving up on this anchor and skipping it (treating as invalid anchor).`
-                )
-                return null
-              }
-            } catch (listErr) {
-              (0,core.debug)(
-                `Failed to list reviews after 404 on review ${reviewId}: ${
-                  listErr instanceof Error ? listErr.message : String(listErr)
-                }`
-              )
+              await new Promise((r) => setTimeout(r, delay))
+              continue
             }
+            if (!stillThere) {
+              (0,core.debug)(
+                `404 adding comment ${comment.path}:${formatLineRange(
+                  comment.start_line,
+                  comment.line
+                )}: pending review ${reviewId} no longer present (considered stale) after attempt ${attempt}.`
+              )
+            } else if (attempt >= maxAttempts) {
+              (0,core.debug)(
+                `404 adding comment ${comment.path}:${formatLineRange(
+                  comment.start_line,
+                  comment.line
+                )} persists after ${attempt} attempts; giving up on this anchor and skipping it (treating as invalid anchor).`
+              )
+              return null
+            }
+          } catch (listErr) {
+            (0,core.debug)(
+              `Failed to list reviews after 404 on review ${reviewId}: ${
+                listErr instanceof Error ? listErr.message : String(listErr)
+              }`
+            )
+          }
           // Only propagate if review vanished; otherwise we either retried or skipped.
           if (attempt === maxAttempts) {
             // If we reached here and didn't return null, treat as stale and throw to outer handler.
@@ -59772,8 +59819,8 @@ async function createReview({
         throw err
       }
     }
-  // Should not reach here; return null for type safety.
-  return null
+    // Should not reach here; return null for type safety.
+    return null
   }
 
   /** Delete a pending review.
@@ -59800,7 +59847,9 @@ async function createReview({
       const { data: reviews } = await listFn({ ...prContext, per_page: 100 })
       const pending = reviews.filter((r) => r.state === 'PENDING')
       if (pending.length) {
-        (0,core.debug)(`Deleting ${pending.length} existing pending review(s) before starting.`)
+        (0,core.debug)(
+          `Deleting ${pending.length} existing pending review(s) before starting.`
+        )
       } else {
         (0,core.debug)('No existing pending reviews to delete.')
       }
@@ -59818,48 +59867,48 @@ async function createReview({
   }
 
   try {
-      // Always start clean: delete any existing pending reviews first.
-      await deleteAllPendingReviews()
-      await createReviewWithComments()
-      return { comments, reviewCreated: true }
+    // Always start clean: delete any existing pending reviews first.
+    await deleteAllPendingReviews()
+    await createReviewWithComments()
+    return { comments, reviewCreated: true }
   } catch (err) {
-      if (!isLineOutsideDiffError(err) && !isDuplicatePendingReviewError(err))
-        throw err
-      ;(0,core.debug)(
-        isLineOutsideDiffError(err)
-          ? 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
-          : 'Batch review creation failed (422: one pending review per pull request) even after cleanup; attempting forced fresh pending salvage.'
+    if (!isLineOutsideDiffError(err) && !isDuplicatePendingReviewError(err))
+      throw err
+    ;(0,core.debug)(
+      isLineOutsideDiffError(err)
+        ? 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
+        : 'Batch review creation failed (422: one pending review per pull request) even after cleanup; attempting forced fresh pending salvage.'
+    )
+    if (err instanceof Error) {
+      (0,core.debug)(`Batch failure detail: ${err.message}`)
+    }
+    if (isDuplicatePendingReviewError(err)) {
+      // Cleanup again & attempt fresh pending salvage.
+      await deleteAllPendingReviews()
+      const reviewId = await createPendingReview()
+      let added = 0
+      let skipped = 0
+      for (const comment of comments) {
+        const created = await createReviewComment(reviewId, comment)
+        if (created) added++
+        else skipped++
+      }
+      (0,core.debug)(
+        `Duplicate salvage after forced cleanup into pending review ${reviewId} added=${added} skipped=${skipped}`
       )
-      if (err instanceof Error) {
-        (0,core.debug)(`Batch failure detail: ${err.message}`)
+      if (added === 0) {
+        await deletePendingReview(reviewId)
+        return { comments: [], reviewCreated: false }
       }
-      if (isDuplicatePendingReviewError(err)) {
-        // Cleanup again & attempt fresh pending salvage.
-        await deleteAllPendingReviews()
-        const reviewId = await createPendingReview()
-        let added = 0
-        let skipped = 0
-        for (const comment of comments) {
-          const created = await createReviewComment(reviewId, comment)
-          if (created) added++
-          else skipped++
-        }
-        (0,core.debug)(
-          `Duplicate salvage after forced cleanup into pending review ${reviewId} added=${added} skipped=${skipped}`
-        )
-        if (added === 0) {
-          await deletePendingReview(reviewId)
-          return { comments: [], reviewCreated: false }
-        }
-        await octokit.pulls.submitReview({
-          ...prContext,
-          review_id: reviewId,
-          body,
-          event,
-        })
-        return { comments, reviewCreated: true }
-      }
-      // line-outside-diff salvage path
+      await octokit.pulls.submitReview({
+        ...prContext,
+        review_id: reviewId,
+        body,
+        event,
+      })
+      return { comments, reviewCreated: true }
+    }
+    // line-outside-diff salvage path
     const reviewId = await createPendingReview()
     let added = 0
     let skipped = 0
