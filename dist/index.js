@@ -55306,7 +55306,7 @@ var endpoint = withDefaults(null, DEFAULTS);
 // EXTERNAL MODULE: ./node_modules/fast-content-type-parse/index.js
 var fast_content_type_parse = __nccwpck_require__(1120);
 ;// CONCATENATED MODULE: ./node_modules/@octokit/request-error/dist-src/index.js
-class dist_src_RequestError extends Error {
+class RequestError extends Error {
   name;
   /**
    * http status code
@@ -55421,7 +55421,7 @@ async function fetchWrapper(requestOptions) {
         }
       }
     }
-    const requestError = new dist_src_RequestError(message, 500, {
+    const requestError = new RequestError(message, 500, {
       request: requestOptions
     });
     requestError.cause = error;
@@ -55453,21 +55453,21 @@ async function fetchWrapper(requestOptions) {
     if (status < 400) {
       return octokitResponse;
     }
-    throw new dist_src_RequestError(fetchResponse.statusText, status, {
+    throw new RequestError(fetchResponse.statusText, status, {
       response: octokitResponse,
       request: requestOptions
     });
   }
   if (status === 304) {
     octokitResponse.data = await getResponseData(fetchResponse);
-    throw new dist_src_RequestError("Not modified", status, {
+    throw new RequestError("Not modified", status, {
       response: octokitResponse,
       request: requestOptions
     });
   }
   if (status >= 400) {
     octokitResponse.data = await getResponseData(fetchResponse);
-    throw new dist_src_RequestError(toErrorMessage(octokitResponse.data), status, {
+    throw new RequestError(toErrorMessage(octokitResponse.data), status, {
       response: octokitResponse,
       request: requestOptions
     });
@@ -59099,7 +59099,7 @@ function formatLineRange(startLine, line) {
  */
 function isLineOutsideDiffError(err) {
   return (
-    err instanceof dist_src_RequestError &&
+    err instanceof RequestError &&
     err.status === 422 &&
     /line must be part of the diff/i.test(String(err.message))
   )
@@ -59409,16 +59409,15 @@ async function createReview({
 }) {
   const prContext = { owner, repo, pull_number }
 
-  /** Delete any existing pending reviews created earlier with the same body (likely leftover from a failed run). */
-  async function deleteExistingMatchingPendingReviews() {
+  /** Delete all actor-owned pending reviews (leftovers from prior failed runs). */
+  async function deleteActorPendingReviews() {
+    const actor = String(process.env.GITHUB_ACTOR || '')
+    const listFn = /** @type {any} */ (octokit.pulls).listReviews
+    if (typeof listFn !== 'function') return // test/mocked environments
     try {
-      const { data: reviews } = await octokit.pulls.listReviews(prContext)
-      const actor = String(process.env.GITHUB_ACTOR || '')
+      const { data: reviews } = await listFn(prContext)
       const toDelete = reviews.filter(
-        (r) =>
-          r.state === 'PENDING' &&
-          r.body === body &&
-          (!actor || r.user?.login === actor)
+        (r) => r.state === 'PENDING' && (!actor || r.user?.login === actor)
       )
       for (const r of toDelete) {
         try {
@@ -59426,10 +59425,10 @@ async function createReview({
             ...prContext,
             review_id: r.id,
           })
-          ;(0,core.debug)(`Deleted pre-existing pending review ${r.id} (body match).`)
+          ;(0,core.debug)(`Deleted actor pending review ${r.id}.`)
         } catch (err) {
           (0,core.debug)(
-            `Failed to delete pre-existing pending review ${r.id}: ${
+            `Failed to delete actor pending review ${r.id}: ${
               err instanceof Error ? err.message : String(err)
             }`
           )
@@ -59437,32 +59436,60 @@ async function createReview({
       }
     } catch (listErr) {
       (0,core.debug)(
-        `Could not list existing reviews for cleanup: ${
+        `Could not list reviews for pending cleanup: ${
           listErr instanceof Error ? listErr.message : String(listErr)
         }`
       )
     }
   }
 
-  /** Attempt to create a review with all comments. Throws on failure. */
+  /** Attempt to create a review with all comments; on duplicate pending review, cleanup then retry once. */
   async function createReviewWithComments() {
-    await octokit.pulls.createReview({
-      ...prContext,
-      commit_id,
-      body,
-      event,
-      comments,
-    })
+    try {
+      await octokit.pulls.createReview({
+        ...prContext,
+        commit_id,
+        body,
+        event,
+        comments,
+      })
+    } catch (err) {
+      if (isDuplicatePendingReviewError(err)) {
+        (0,core.debug)('Duplicate pending review before batch create; cleaning up and retrying once.')
+        await deleteActorPendingReviews()
+        await octokit.pulls.createReview({
+          ...prContext,
+          commit_id,
+          body,
+          event,
+          comments,
+        })
+      } else {
+        throw err
+      }
+    }
   }
 
-  /** Create a fresh pending review. If duplicate, reuse the first pending found. */
+  /** Create a fresh pending review; on duplicate delete actor-owned pending reviews then retry once. */
   async function createPendingReview() {
-    const created = await octokit.pulls.createReview({
-      ...prContext,
-      commit_id,
-      body,
-    })
-    return created.data.id
+    try {
+      const created = await octokit.pulls.createReview({
+        ...prContext,
+        commit_id,
+        body,
+      })
+      return created.data.id
+    } catch (err) {
+      if (!isDuplicatePendingReviewError(err)) throw err
+      ;(0,core.debug)('Duplicate pending review before salvage; deleting and retrying once.')
+      await deleteActorPendingReviews()
+      const created = await octokit.pulls.createReview({
+        ...prContext,
+        commit_id,
+        body,
+      })
+      return created.data.id
+    }
   }
 
   /**
@@ -59522,8 +59549,8 @@ async function createReview({
   }
 
   try {
-  // Proactive cleanup before first creation attempt
-  await deleteExistingMatchingPendingReviews()
+    // Proactive cleanup before first creation attempt
+    await deleteActorPendingReviews()
     await createReviewWithComments()
     return { comments, reviewCreated: true }
   } catch (err) {

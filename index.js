@@ -416,14 +416,12 @@ async function createReview({
 
   /** Delete any existing pending reviews created earlier with the same body (likely leftover from a failed run). */
   async function deleteExistingMatchingPendingReviews() {
+    const listFn = /** @type {any} */ (octokit.pulls).listReviews
+    if (typeof listFn !== 'function') return // test/mocked environments
     try {
-      const { data: reviews } = await octokit.pulls.listReviews(prContext)
-      const actor = String(process.env.GITHUB_ACTOR || '')
+      const { data: reviews } = await listFn(prContext)
       const toDelete = reviews.filter(
-        (r) =>
-          r.state === 'PENDING' &&
-          r.body === body &&
-          (!actor || r.user?.login === actor)
+        (r) => r.state === 'PENDING' && (!actor || r.user?.login === actor)
       )
       for (const r of toDelete) {
         try {
@@ -431,10 +429,10 @@ async function createReview({
             ...prContext,
             review_id: r.id,
           })
-          debug(`Deleted pre-existing pending review ${r.id} (body match).`)
+          debug(`Deleted actor pending review ${r.id}.`)
         } catch (err) {
           debug(
-            `Failed to delete pre-existing pending review ${r.id}: ${
+            `Failed to delete actor pending review ${r.id}: ${
               err instanceof Error ? err.message : String(err)
             }`
           )
@@ -442,32 +440,60 @@ async function createReview({
       }
     } catch (listErr) {
       debug(
-        `Could not list existing reviews for cleanup: ${
+        `Could not list reviews for pending cleanup: ${
           listErr instanceof Error ? listErr.message : String(listErr)
         }`
       )
     }
   }
 
-  /** Attempt to create a review with all comments. Throws on failure. */
+  /** Attempt to create a review with all comments; on duplicate pending review, cleanup then retry once. */
   async function createReviewWithComments() {
-    await octokit.pulls.createReview({
-      ...prContext,
-      commit_id,
-      body,
-      event,
-      comments,
-    })
+    try {
+      await octokit.pulls.createReview({
+        ...prContext,
+        commit_id,
+        body,
+        event,
+        comments,
+      })
+    } catch (err) {
+      if (isDuplicatePendingReviewError(err)) {
+        debug('Duplicate pending review before batch create; cleaning up and retrying once.')
+        await deleteActorPendingReviews()
+        await octokit.pulls.createReview({
+          ...prContext,
+          commit_id,
+          body,
+          event,
+          comments,
+        })
+      } else {
+        throw err
+      }
+    }
   }
 
-  /** Create a fresh pending review. If duplicate, reuse the first pending found. */
+  /** Create a fresh pending review; on duplicate delete actor-owned pending reviews then retry once. */
   async function createPendingReview() {
-    const created = await octokit.pulls.createReview({
-      ...prContext,
-      commit_id,
-      body,
-    })
-    return created.data.id
+    try {
+      const created = await octokit.pulls.createReview({
+        ...prContext,
+        commit_id,
+        body,
+      })
+      return created.data.id
+    } catch (err) {
+      if (!isDuplicatePendingReviewError(err)) throw err
+      debug('Duplicate pending review before salvage; deleting and retrying once.')
+      await deleteActorPendingReviews()
+      const created = await octokit.pulls.createReview({
+        ...prContext,
+        commit_id,
+        body,
+      })
+      return created.data.id
+    }
   }
 
   /**
@@ -527,8 +553,8 @@ async function createReview({
   }
 
   try {
-  // Proactive cleanup before first creation attempt
-  await deleteExistingMatchingPendingReviews()
+    // Proactive cleanup before first creation attempt
+    await deleteActorPendingReviews()
     await createReviewWithComments()
     return { comments, reviewCreated: true }
   } catch (err) {
