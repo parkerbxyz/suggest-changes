@@ -59420,10 +59420,10 @@ async function createReview({
     })
   }
 
-  /** Ensure a pending review exists (reuse existing or create new) and return its ID.
-   * No deletion is performed to avoid races and 404s. */
+  /** Ensure a pending review exists (reuse existing or create new).
+   * Returns { id, commitId, reused }.
+   * If reusing and commit differs, we log a debug note and still proceed anchoring to the existing review commit. */
   async function ensurePendingReview() {
-    // First attempt: create directly (fast path)
     try {
       /** @type {{ data: CreatedReview }} */
       const created = await octokit.pulls.createReview({
@@ -59431,18 +59431,24 @@ async function createReview({
         commit_id,
         body,
       })
-      return created.data.id
+      return { id: created.data.id, commitId: commit_id, reused: false }
     } catch (err) {
       if (!isDuplicatePendingReviewError(err)) throw err
-      // Duplicate: list and reuse existing pending review
       const existing = await octokit.pulls.listReviews(prContext)
       const pending = existing.data.find((r) => r.state === 'PENDING')
-      if (pending) {
+      if (!pending) throw err
+      if (pending.commit_id && pending.commit_id !== commit_id) {
+        (0,core.debug)(
+          `Reusing pending review ${pending.id} created for commit ${pending.commit_id} (current head ${commit_id}). Suggestions will attach to the older commit.`
+        )
+      } else {
         (0,core.debug)(`Reusing existing pending review ${pending.id} (duplicate 422).`)
-        return pending.id
       }
-      // Fallback: rethrow original duplicate (should be rare if list succeeded but none found)
-      throw err
+      return {
+        id: pending.id,
+        commitId: pending.commit_id || commit_id,
+        reused: true,
+      }
     }
   }
 
@@ -59454,14 +59460,14 @@ async function createReview({
    * @param {ReviewCommentDraft} comment
    * @returns {Promise<CreatedReviewComment | null>}
    */
-  async function createReviewComment(reviewId, comment) {
+  async function createReviewComment(reviewId, comment, targetCommitId) {
     try {
       const response = await octokit.request(
         'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments',
         {
           ...prContext,
           review_id: reviewId,
-          commit_id,
+          commit_id: targetCommitId,
           body: comment.body,
           path: comment.path,
           line: comment.line,
@@ -59513,11 +59519,21 @@ async function createReview({
         ? 'Batch review creation failed (422: one pending review per pull request). Falling back to pending review salvage path.'
         : 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
     )
-  const reviewId = await ensurePendingReview()
+  const { id: reviewId, commitId: salvageCommitId, reused } =
+    await ensurePendingReview()
+    if (reused && salvageCommitId !== commit_id) {
+      (0,core.debug)(
+        `Salvage path using reused review commit ${salvageCommitId}; diff generated for ${commit_id}. Potential line anchoring mismatches may occur.`
+      )
+    }
     let added = 0
     let skipped = 0
     for (const comment of comments) {
-      const created = await createReviewComment(reviewId, comment)
+      const created = await createReviewComment(
+        reviewId,
+        comment,
+        salvageCommitId
+      )
       if (created) added++
       else skipped++
     }
