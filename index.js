@@ -114,6 +114,15 @@ function debugVerbose(msgFn) {
   }
 }
 
+/** Safely JSON.stringify for debug without throwing. */
+function safeJson(value, fallback = '') {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return fallback
+  }
+}
+
 /**
  * Returns true for the known 422 "line must be part of the diff" validation failure.
  * Strictly requires an Octokit RequestError so unrelated errors are rethrown.
@@ -164,7 +173,6 @@ const filterChangesByType = (changes) => ({
  */
 export const groupChangesForSuggestions = (changes) => {
   if (changes.length === 0) return []
-
   // Group by line proximity using appropriate coordinate systems
   // - Deletions use lineBefore (original file line numbers)
   // - Additions use lineAfter (new file line numbers)
@@ -668,10 +676,18 @@ async function createReview({
               `404 error detail attempt=${attempt} target=${comment.path}:${formatLineRange(
                 comment.start_line,
                 comment.line
-              )} status=${anyErr.status} message=${anyErr.message}$${
+              )} status=${anyErr.status} message=${anyErr.message}${
                 data && data.message ? ` apiMessage=${data.message}` : ''
               } requestId=${headers['x-github-request-id'] || 'n/a'}`
             )
+            debugVerbose(() => {
+              const interestingHeaders = ['x-ratelimit-remaining', 'x-ratelimit-reset', 'x-github-enterprise-version']
+                .map((h) => `${h}=${headers[h] ?? 'n/a'}`)
+                .join(' ')
+              const payload = safeJson(data)
+              const truncatedPayload = payload && payload.length > 1200 ? payload.slice(0, 1200) + '…(truncated)' : payload
+              return `404 extended debug target=${comment.path}:${formatLineRange(comment.start_line, comment.line)} review=${reviewId} commit=${commit_id.slice(0,7)} start_line=${comment.start_line ?? ''} line=${comment.line} headers{${interestingHeaders}} payload=${truncatedPayload}`
+            })
           } catch {/* ignore structured logging issues */}
           if (attempt === 1) {
             // Fetch and log the target line content at first 404 for added clarity
