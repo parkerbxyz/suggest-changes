@@ -414,86 +414,46 @@ async function createReview({
 }) {
   const prContext = { owner, repo, pull_number }
 
-  /** Delete any existing pending reviews created earlier with the same body (likely leftover from a failed run). */
-  async function deleteExistingMatchingPendingReviews() {
+  /** Find an existing actor-owned pending review (reuse only for adding comments). */
+  async function findActorPendingReview() {
+    const actor = String(process.env.GITHUB_ACTOR || '')
     const listFn = /** @type {any} */ (octokit.pulls).listReviews
-    if (typeof listFn !== 'function') return // test/mocked environments
+    if (typeof listFn !== 'function') return null
     try {
       const { data: reviews } = await listFn(prContext)
-      const toDelete = reviews.filter(
+      const pending = reviews.find(
         (r) => r.state === 'PENDING' && (!actor || r.user?.login === actor)
       )
-      for (const r of toDelete) {
-        try {
-          await octokit.pulls.deletePendingReview({
-            ...prContext,
-            review_id: r.id,
-          })
-          debug(`Deleted actor pending review ${r.id}.`)
-        } catch (err) {
-          debug(
-            `Failed to delete actor pending review ${r.id}: ${
-              err instanceof Error ? err.message : String(err)
-            }`
-          )
-        }
-      }
-    } catch (listErr) {
+      return pending ? pending.id : null
+    } catch (err) {
       debug(
-        `Could not list reviews for pending cleanup: ${
-          listErr instanceof Error ? listErr.message : String(listErr)
+        `Could not list reviews to detect existing pending review: ${
+          err instanceof Error ? err.message : String(err)
         }`
       )
+      return null
     }
   }
 
-  /** Attempt to create a review with all comments; on duplicate pending review, cleanup then retry once. */
+  /** Attempt to create a review with all comments (batch). */
   async function createReviewWithComments() {
-    try {
-      await octokit.pulls.createReview({
-        ...prContext,
-        commit_id,
-        body,
-        event,
-        comments,
-      })
-    } catch (err) {
-      if (isDuplicatePendingReviewError(err)) {
-        debug('Duplicate pending review before batch create; cleaning up and retrying once.')
-        await deleteActorPendingReviews()
-        await octokit.pulls.createReview({
-          ...prContext,
-          commit_id,
-          body,
-          event,
-          comments,
-        })
-      } else {
-        throw err
-      }
-    }
+    await octokit.pulls.createReview({
+      ...prContext,
+      commit_id,
+      body,
+      event,
+      comments,
+    })
   }
 
-  /** Create a fresh pending review; on duplicate delete actor-owned pending reviews then retry once. */
+  /** Create a fresh pending review (no reuse or deletion logic here). */
   async function createPendingReview() {
-    try {
-      const created = await octokit.pulls.createReview({
-        ...prContext,
-        commit_id,
-        body,
-      })
-      return created.data.id
-    } catch (err) {
-      if (!isDuplicatePendingReviewError(err)) throw err
-      debug('Duplicate pending review before salvage; deleting and retrying once.')
-      await deleteActorPendingReviews()
-      const created = await octokit.pulls.createReview({
-        ...prContext,
-        commit_id,
-        body,
-      })
-      return created.data.id
-    }
+    const created = await octokit.pulls.createReview({
+      ...prContext,
+      commit_id,
+      body,
+    })
+    return created.data.id
   }
 
   /**
@@ -553,15 +513,77 @@ async function createReview({
   }
 
   try {
-    // Proactive cleanup before first creation attempt
-    await deleteActorPendingReviews()
-    await createReviewWithComments()
-    return { comments, reviewCreated: true }
+      // If an actor-owned pending review already exists, skip batch and salvage directly into it.
+      const existingPendingId = await findActorPendingReview()
+      if (existingPendingId) {
+        debug(
+          `Found existing actor-owned pending review ${existingPendingId}; skipping batch and adding comments individually.`
+        )
+        let added = 0
+        let skipped = 0
+        for (const comment of comments) {
+          const created = await createReviewComment(existingPendingId, comment)
+          if (created) added++
+          else skipped++
+        }
+        if (added === 0) {
+          debug(
+            'Existing pending review received no new comments; leaving it unsubmitted.'
+          )
+          return { comments: [], reviewCreated: false }
+        }
+        await octokit.pulls.submitReview({
+          ...prContext,
+          review_id: existingPendingId,
+          body,
+          event,
+        })
+        debug(
+          `Submitted existing pending review salvage (added: ${added}, skipped: ${skipped}).`
+        )
+        return { comments, reviewCreated: true }
+      }
+      await createReviewWithComments()
+      return { comments, reviewCreated: true }
   } catch (err) {
-    if (!isLineOutsideDiffError(err)) throw err
-    debug(
-      'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
-    )
+      if (!isLineOutsideDiffError(err) && !isDuplicatePendingReviewError(err))
+        throw err
+      debug(
+        isLineOutsideDiffError(err)
+          ? 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
+          : 'Batch review creation failed (422: one pending review per pull request). Reusing actor pending review if present.'
+      )
+      if (isDuplicatePendingReviewError(err)) {
+        const existingPendingId = await findActorPendingReview()
+        if (existingPendingId) {
+          let added = 0
+          let skipped = 0
+          for (const comment of comments) {
+            const created = await createReviewComment(existingPendingId, comment)
+            if (created) added++
+            else skipped++
+          }
+          if (added === 0) {
+            debug(
+              'Duplicate path reuse: no comments added; not submitting existing pending review.'
+            )
+            return { comments: [], reviewCreated: false }
+          }
+          await octokit.pulls.submitReview({
+            ...prContext,
+            review_id: existingPendingId,
+            body,
+            event,
+          })
+          debug(
+            `Submitted duplicate salvage on existing pending review (added: ${added}, skipped: ${skipped}).`
+          )
+          return { comments, reviewCreated: true }
+        }
+        // If no actor pending found, propagate error (foreign pending review present).
+        throw err
+      }
+      // line-outside-diff salvage path
     const reviewId = await createPendingReview()
     let added = 0
     let skipped = 0
