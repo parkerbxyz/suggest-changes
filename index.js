@@ -632,7 +632,6 @@ async function createReview({
             const params = {
               ...prContext,
               review_id: reviewId,
-              commit_id,
               body: comment.body,
               path: comment.path,
               line: comment.line,
@@ -648,7 +647,7 @@ async function createReview({
                   comment.path
                 } start_line=${comment.start_line ?? ''} line=${
                   comment.line
-                } commit=${commit_id.slice(0, 7)} has_start=${
+                } commit=omitted has_start=${
                   comment.start_line !== undefined
                 } bodyLen=${comment.body.length}`
             )
