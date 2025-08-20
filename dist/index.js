@@ -59409,9 +59409,8 @@ async function createReview({
 }) {
   const prContext = { owner, repo, pull_number }
 
-  /** Find an existing actor-owned pending review (reuse only for adding comments). */
-  async function findActorPendingReview() {
-    const actor = String(process.env.GITHUB_ACTOR || '')
+  /** Find any existing pending review (regardless of actor). */
+  async function findPendingReview() {
     const listFn = /** @type {any} */ (octokit.pulls).listReviews
     if (typeof listFn !== 'function') return null
     try {
@@ -59419,22 +59418,14 @@ async function createReview({
       const pending = reviews.find((r) => r.state === 'PENDING')
       if (pending) {
         (0,core.debug)(
-          `findActorPendingReview: saw ${reviews.length} reviews; first pending id=${pending.id} user=${pending.user?.login} actor=${actor}`
+          `findPendingReview: found pending review id=${pending.id} user=${pending.user?.login} (total reviews scanned: ${reviews.length})`
         )
-      } else {
-        (0,core.debug)(
-          `findActorPendingReview: no pending review among ${reviews.length} reviews for actor=${actor}`
-        )
+        return pending.id
       }
-      const actorPending = reviews.find(
-        (r) => r.state === 'PENDING' && (!actor || r.user?.login === actor)
+      (0,core.debug)(
+        `findPendingReview: no pending review among ${reviews.length} reviews.`
       )
-      if (!actorPending && pending && pending.user?.login) {
-        (0,core.debug)(
-          `findActorPendingReview: pending review exists but belongs to ${pending.user.login}, not current actor ${actor}`
-        )
-      }
-      return actorPending ? actorPending.id : null
+      return null
     } catch (err) {
       (0,core.debug)(
         `Could not list reviews to detect existing pending review: ${
@@ -59523,11 +59514,11 @@ async function createReview({
   }
 
   try {
-      // If an actor-owned pending review already exists, skip batch and salvage directly into it.
-      const existingPendingId = await findActorPendingReview()
+    // If any pending review already exists, skip batch and salvage directly into it.
+    const existingPendingId = await findPendingReview()
       if (existingPendingId) {
         (0,core.debug)(
-          `Found existing actor-owned pending review ${existingPendingId}; skipping batch and adding comments individually.`
+      `Found existing pending review ${existingPendingId}; skipping batch and adding comments individually.`
         )
         let added = 0
         let skipped = 0
@@ -59561,18 +59552,18 @@ async function createReview({
       ;(0,core.debug)(
         isLineOutsideDiffError(err)
           ? 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
-          : 'Batch review creation failed (422: one pending review per pull request). Reusing actor pending review if present.'
+          : 'Batch review creation failed (422: one pending review per pull request). Reusing existing pending review if present.'
       )
       if (isDuplicatePendingReviewError(err)) {
-        // Retry a few times to locate the actor's pending review (eventual consistency or race).
-        let existingPendingId = await findActorPendingReview()
+        // Retry a few times to locate the pending review (eventual consistency or race).
+        let existingPendingId = await findPendingReview()
         if (!existingPendingId) {
           for (let attempt = 1; attempt <= 3 && !existingPendingId; attempt++) {
             await new Promise((r) => setTimeout(r, 250 * attempt))
-            existingPendingId = await findActorPendingReview()
+            existingPendingId = await findPendingReview()
             if (existingPendingId) {
               (0,core.debug)(
-                `Duplicate salvage: found actor pending review on retry attempt ${attempt}.`
+                `Duplicate salvage: found pending review on retry attempt ${attempt}.`
               )
               break
             }
@@ -59604,9 +59595,7 @@ async function createReview({
           return { comments, reviewCreated: true }
         }
         // Could not find the pending review even though API reported duplicate. Log + graceful skip.
-        (0,core.debug)(
-          'Duplicate 422 reported, but no actor-owned pending review could be located after retries; skipping suggestions without failing action.'
-        )
+  (0,core.debug)('Duplicate 422 reported, but no pending review could be located after retries; skipping suggestions without failing action.')
         return { comments: [], reviewCreated: false }
       }
       // line-outside-diff salvage path
