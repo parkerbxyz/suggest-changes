@@ -111,6 +111,19 @@ function isLineOutsideDiffError(err) {
 }
 
 /**
+ * Returns true for the 422 error when a user already has a pending review on the PR.
+ * @param {unknown} err
+ * @returns {err is RequestError}
+ */
+function isDuplicatePendingReviewError(err) {
+  return (
+    err instanceof RequestError &&
+    err.status === 422 &&
+    /only have one pending review/i.test(String(err.message))
+  )
+}
+
+/**
  * Filter changes by type for easier processing
  * @param {AnyLineChange[]} changes - Array of changes to filter
  * @returns {{addedLines: AddedLine[], deletedLines: DeletedLine[], unchangedLines: UnchangedLine[]}}
@@ -523,9 +536,12 @@ async function createReview({
     await createReviewWithComments()
     return { comments, reviewCreated: true }
   } catch (err) {
-    if (!isLineOutsideDiffError(err)) throw err
+    if (!isLineOutsideDiffError(err) && !isDuplicatePendingReviewError(err))
+      throw err
     debug(
-      'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
+      isDuplicatePendingReviewError(err)
+        ? 'Batch review creation failed (422: one pending review per pull request). Falling back to pending review salvage path.'
+        : 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
     )
     const reviewId = await createPendingReview()
     let added = 0
