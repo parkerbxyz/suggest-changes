@@ -123,6 +123,11 @@ function isDuplicatePendingReviewError(err) {
   )
 }
 
+/** Returns true when a 404 occurs (stale pending review, missing resource, etc.). */
+function isNotFoundError(err) {
+  return err instanceof RequestError && err.status === 404
+}
+
 /**
  * Filter changes by type for easier processing
  * @param {AnyLineChange[]} changes - Array of changes to filter
@@ -524,8 +529,8 @@ async function createReview({
         ? 'Batch review creation failed (422: one pending review per pull request). Falling back to pending review salvage path.'
         : 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
     )
-  const { id: reviewId, commitId: salvageCommitId, reused } =
-    await ensurePendingReview()
+    let { id: reviewId, commitId: salvageCommitId, reused } =
+      await ensurePendingReview()
     if (reused && salvageCommitId !== commit_id) {
       debug(
         `Salvage path using reused review commit ${salvageCommitId}; diff generated for ${commit_id}. Potential line anchoring mismatches may occur.`
@@ -533,14 +538,54 @@ async function createReview({
     }
     let added = 0
     let skipped = 0
+    let staleRetried = false
     for (const comment of comments) {
-      const created = await createReviewComment(
-        reviewId,
-        comment,
-        salvageCommitId
-      )
-      if (created) added++
-      else skipped++
+      try {
+        const created = await createReviewComment(
+          reviewId,
+          comment,
+          salvageCommitId
+        )
+        if (created) added++
+        else skipped++
+      } catch (err) {
+        // If the reused pending review vanished (404), attempt one fresh create then retry this comment once.
+        if (reused && !staleRetried && isNotFoundError(err)) {
+          debug(
+            `Reused pending review ${reviewId} returned 404 (stale). Attempting to create a fresh pending review and retry.`
+          )
+          staleRetried = true
+          reused = false
+          try {
+            /** @type {{ data: CreatedReview }} */
+            const fresh = await octokit.pulls.createReview({
+              ...prContext,
+              commit_id,
+              body,
+            })
+            reviewId = fresh.data.id
+            salvageCommitId = commit_id
+            const created = await createReviewComment(
+              reviewId,
+              comment,
+              salvageCommitId
+            )
+            if (created) added++
+            else skipped++
+            continue
+          } catch (freshErr) {
+            if (isDuplicatePendingReviewError(freshErr)) {
+              debug(
+                'Unexpected duplicate pending review after stale 404; skipping comment.'
+              )
+              skipped++
+              continue
+            }
+            throw freshErr
+          }
+        }
+        throw err
+      }
     }
     if (added === 0) {
       debug(
@@ -549,13 +594,25 @@ async function createReview({
       await deletePendingReview(reviewId)
       return { comments: [], reviewCreated: false }
     }
-    await octokit.pulls.submitReview({
-      ...prContext,
-      review_id: reviewId,
-      body,
-      event,
-    })
-    debug(`Submitted salvage review (added: ${added}, skipped: ${skipped}).`)
+    try {
+      await octokit.pulls.submitReview({
+        ...prContext,
+        review_id: reviewId,
+        body,
+        event,
+      })
+    } catch (submitErr) {
+      if (isNotFoundError(submitErr) && !reused) {
+        debug(
+          `Pending review ${reviewId} disappeared before submission (404). Treating as no-op salvage.`
+        )
+        return { comments: [], reviewCreated: false }
+      }
+      throw submitErr
+    }
+    debug(
+      `Submitted salvage review (added: ${added}, skipped: ${skipped}, reusedPending: ${reused}, staleRetried: ${staleRetried}).`
+    )
     return { comments, reviewCreated: true }
   }
 }
