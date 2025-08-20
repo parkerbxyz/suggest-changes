@@ -59301,11 +59301,11 @@ const processChunkChanges = (
     // Skip if comment already exists
     const commentKey = generateCommentKey(comment)
     if (existingCommentKeys.has(commentKey)) {
-      (0,core.info)(
-        `Skipping suggestion for ${comment.path}:${formatLineRange(
+      (0,core.debug)(
+        `Skipping duplicate suggestion ${comment.path}:${formatLineRange(
           comment.start_line,
           comment.line
-        )} to avoid duplicating existing review comment`
+        )}`
       )
       return []
     }
@@ -59378,21 +59378,23 @@ async function run({
           }
           validRightLines[file.path] = set
         }
-        let kept = 0
-        let adjusted = 0
-        let dropped = 0
+        const initialCount = comments.length
+    let kept = 0
+    let skippedAnchors = 0
+        /** @type {Set<string>} */
+        const missingFiles = new Set()
         for (let i = comments.length - 1; i >= 0; i--) {
           const c = comments[i]
           const set = validRightLines[c.path]
           if (!set) {
             (0,core.debug)(
-              `PR diff filter: dropping ${c.path}:${formatLineRange(
+              `Skipping suggestion (file missing) ${c.path}:${formatLineRange(
                 c.start_line,
                 c.line
-              )} (file missing)`
-            ) // eslint-disable-line
+              )}`
+            )
             comments.splice(i, 1)
-            dropped++
+            missingFiles.add(c.path)
             continue
           }
           const lineOk = set.has(c.line)
@@ -59401,31 +59403,31 @@ async function run({
             kept++
             continue
           }
-          if (lineOk && c.start_line !== undefined) {
-            const original = formatLineRange(c.start_line, c.line)
-            delete c.start_line
-            delete c.start_side
-            adjusted++
-            kept++
-            ;(0,core.debug)(
-              `PR diff filter: adjusted multi-line -> single-line ${c.path}:${original} => ${c.line}`
+            (0,core.debug)(
+              `Skipping suggestion (invalid anchor) ${c.path}:${formatLineRange(
+                c.start_line,
+                c.line
+              )}`
             )
-            continue
-          }
-          (0,core.debug)(
-            `PR diff filter: dropping ${c.path}:${formatLineRange(
-              c.start_line,
-              c.line
-            )} (invalid anchor)`
-          ) // eslint-disable-line
-          comments.splice(i, 1)
-          dropped++
+            comments.splice(i, 1)
+            skippedAnchors++
         }
-        (0,core.debug)(
-          `PR diff filter summary: kept=${kept} adjusted=${adjusted} dropped=${dropped} (input=${
-            kept + adjusted + dropped
-          })`
-        )
+        if (initialCount > 0) {
+          const plural = (n) => (n === 1 ? '' : 's')
+          ;(0,core.info)(
+            `Prepared ${kept} suggestion${plural(kept)} for review (from ${initialCount} initial).`
+          )
+            if (skippedAnchors > 0) {
+              (0,core.info)(
+                `Skipped ${skippedAnchors} suggestion${plural(skippedAnchors)} because line(s) are not part of the pull request diff.`
+              )
+            }
+          if (missingFiles.size > 0) {
+            (0,core.info)(
+              `Skipped suggestions in ${missingFiles.size} file${plural(missingFiles.size)} that are not part of the pull request.`
+            )
+          }
+        }
       } else {
         (0,core.debug)(
           'PR diff filter: unexpected server diff format; skipping canonical filtering.'
