@@ -59407,16 +59407,55 @@ async function createReview({
     })
   }
 
-  /** Create a pending review and return its ID.
+  /** Create a fresh pending review (deleting any lingering pending review first if necessary) and return its ID.
    * @returns {Promise<CreatedReview['id']>} */
   async function createPendingReview() {
-    /** @type {{ data: CreatedReview }} */
-    const pending = await octokit.pulls.createReview({
-      ...prContext,
-      commit_id,
-      body,
-    })
-    return pending.data.id
+    const attemptCreate = async () => {
+      /** @type {{ data: CreatedReview }} */
+      const pending = await octokit.pulls.createReview({
+        ...prContext,
+        commit_id,
+        body,
+      })
+      return pending.data.id
+    }
+    try {
+      return await attemptCreate()
+    } catch (err) {
+      const pendingReview =
+        err instanceof RequestError &&
+        err.status === 422 &&
+        /only have one pending review/i.test(String(err.message))
+      if (!pendingReview) throw err
+      // Locate pending review and delete it, then retry once.
+      try {
+        const existing = await octokit.pulls.listReviews(prContext)
+        const stale = existing.data.find((r) => r.state === 'PENDING')
+        if (!stale) throw err
+        try {
+          await octokit.pulls.deletePendingReview({
+            ...prContext,
+            review_id: stale.id,
+          })
+          ;(0,core.debug)(`Deleted stale pending review ${stale.id}. Retrying creation.`)
+        } catch (delErr) {
+          (0,core.debug)(
+            `Failed to delete stale pending review ${stale.id}: ${
+              delErr instanceof Error ? delErr.message : String(delErr)
+            }`
+          )
+          throw err
+        }
+      } catch (listErr) {
+        (0,core.debug)(
+          `Could not resolve stale pending review after duplicate error: ${
+            listErr instanceof Error ? listErr.message : String(listErr)
+          }`
+        )
+        throw err
+      }
+      return await attemptCreate()
+    }
   }
 
   /**
