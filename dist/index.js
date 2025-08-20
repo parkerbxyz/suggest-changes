@@ -59009,11 +59009,11 @@ function getFilePath(ctx, input, type) {
 /** @typedef {import('parse-git-diff').DeletedLine} DeletedLine */
 /** @typedef {import('parse-git-diff').UnchangedLine} UnchangedLine */
 /** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
-/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
+/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} ReviewCommentInput */
 /** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data']} CreatedReviewComment */
 /** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['response']['data']} CreatedReview */
 /** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/comments']['parameters']} CreateReviewCommentParams */
-/** @typedef {Pick<CreateReviewCommentParams,'path'|'body'|'line'> & { start_line?: CreateReviewCommentParams['start_line'] }} ReviewCommentDraft */
+/** @typedef {Pick<CreateReviewCommentParams,'path'|'body'|'start_line'> & { line: number }} ReviewCommentDraft */
 /** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']>} ReviewEvent */
 /** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
 
@@ -59079,15 +59079,16 @@ const createSuggestion = (content) => {
 }
 
 /**
- * Format a line range for logging: "start-end" for multi-line, or "line" for single-line.
- * @param {number | undefined} startLine - First line (undefined for single-line suggestions)
- * @param {number} endLine - Last line (or the only line if single-line)
- * @returns {string} Formatted line range
+ * Format a line range for logging: "start-end" for multi-line, or the single line number.
+ * startLine is undefined for single-line suggestions; line is always defined.
+ * @param {number | undefined} startLine
+ * @param {number} line
+ * @returns {string}
  */
-function formatLineRange(startLine, endLine) {
-  return typeof startLine === 'number' && startLine !== endLine
-    ? `${startLine}-${endLine}`
-    : String(endLine)
+function formatLineRange(startLine, line) {
+  return typeof startLine === 'number' && startLine !== line
+    ? `${startLine}-${line}`
+    : String(line)
 }
 
 /**
@@ -59233,7 +59234,7 @@ const calculateLinePosition = (
 
 /**
  * Function to generate a unique key for a comment
- * @param {PostReviewComment | GetReviewComment} comment
+ * @param {ReviewCommentInput | GetReviewComment} comment
  * @returns {string}
  */
 const generateCommentKey = (comment) =>
@@ -59428,19 +59429,22 @@ async function createReview({
    */
   async function createReviewComment(reviewId, comment) {
     try {
-      const response = await octokit.pulls.createReviewComment({
-        ...prContext,
-        commit_id,
-        pull_request_review_id: reviewId,
-        body: comment.body,
-        path: comment.path,
-        line: comment.line,
-        side: /** @type {'RIGHT'} */ ('RIGHT'),
-        ...(comment.start_line !== undefined && {
-          start_line: comment.start_line,
-          start_side: /** @type {'RIGHT'} */ ('RIGHT'),
-        }),
-      })
+      const response = await octokit.request(
+        'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments',
+        {
+          ...prContext,
+          review_id: reviewId,
+          commit_id,
+          body: comment.body,
+          path: comment.path,
+          line: comment.line,
+          side: /** @type {'RIGHT'} */ ('RIGHT'),
+          ...(comment.start_line !== undefined && {
+            start_line: comment.start_line,
+            start_side: /** @type {'RIGHT'} */ ('RIGHT'),
+          }),
+        }
+      )
       return response.data
     } catch (err) {
       if (isLineOutsideDiffError(err)) {
