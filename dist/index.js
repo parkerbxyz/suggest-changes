@@ -59501,6 +59501,37 @@ async function createReview({
     return created.data.id
   }
 
+  async function snapshotReview(reviewId) {
+    try {
+      const res = await octokit.pulls.getReview({ ...prContext, review_id: reviewId })
+      ;(0,core.debug)(
+        `Review snapshot id=${reviewId} state=${res.data.state} commit_id=${res.data.commit_id?.slice(0,7)}`
+      )
+    } catch (e) {
+      (0,core.debug)(
+        `Review snapshot fetch failed id=${reviewId}: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      )
+    }
+  }
+
+  async function pathExistsInPR(path) {
+    try {
+      const files = (
+        await octokit.pulls.listFiles({ ...prContext, per_page: 300 })
+      ).data
+      return files.some((f) => f.filename === path)
+    } catch (e) {
+      (0,core.debug)(
+        `Could not list PR files for path existence: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      )
+      return true // assume true to avoid false negatives
+    }
+  }
+
   /**
    * Attempt to add a single review comment.
    * Returns the created comment object on success, null if skipped due to the
@@ -59520,6 +59551,17 @@ async function createReview({
               comment.line
             )} (body length ${comment.body.length})`
         )
+        if (attempt === 1) {
+          await snapshotReview(reviewId)
+          const pathPresent = await pathExistsInPR(comment.path)
+          debugVerbose(
+            () =>
+              `Pre-add sanity: path ${comment.path} presentInPR=${pathPresent} commit_id=${commit_id.slice(
+                0,
+                7
+              )}`
+          )
+        }
         const response = await octokit.request(
           'POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments',
           {
@@ -59563,6 +59605,7 @@ async function createReview({
               const stillThere = reviews.some(
                 (r) => r.id === reviewId && r.state === 'PENDING'
               )
+              debugVerbose(() => `404 diagnostic: stillThere=${stillThere} reviewsCount=${reviews.length}`)
               if (stillThere && attempt < maxAttempts) {
                 const delay = 150 * attempt
                 ;(0,core.debug)(
