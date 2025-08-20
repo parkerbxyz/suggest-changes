@@ -123,6 +123,10 @@ function isDuplicatePendingReviewError(err) {
   )
 }
 
+function isNotFoundError(err) {
+  return err instanceof RequestError && err.status === 404
+}
+
 /**
  * Filter changes by type for easier processing
  * @param {AnyLineChange[]} changes - Array of changes to filter
@@ -425,44 +429,54 @@ async function createReview({
     })
   }
 
-  /** Purge any existing pending reviews then create a fresh pending review.
-   * Returns the new review id. */
-  async function purgeAndCreatePendingReview() {
-    // List current reviews, delete all pending ones (best effort)
-    const existing = await octokit.pulls.listReviews(prContext)
-    const pending = existing.data.filter((r) => r.state === 'PENDING')
-    for (const r of pending) {
-      try {
-        await octokit.pulls.deletePendingReview({ ...prContext, review_id: r.id })
-        debug(`Deleted stale pending review ${r.id}`)
-      } catch (delErr) {
-        debug(
-          `Failed to delete stale pending review ${r.id}: ${
-            delErr instanceof Error ? delErr.message : String(delErr)
-          }`
-        )
-      }
-    }
-    // Create fresh pending review. If duplicate still happens, we attempt one quick retry after a short delay.
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        /** @type {{ data: CreatedReview }} */
-        const created = await octokit.pulls.createReview({
-          ...prContext,
-          commit_id,
-          body,
-        })
-        return created.data.id
-      } catch (err) {
-        if (isDuplicatePendingReviewError(err) && attempt === 1) {
-          debug('Duplicate pending review after purge; retrying once.')
-          await new Promise((res) => setTimeout(res, 300))
-          continue
+  /** Create a pending review or reuse existing if duplicate. Handles 404 by refetching head SHA once. */
+  async function createOrReusePendingReview() {
+    /** Attempt creation with the current commit id */
+    const attemptCreate = async (sha) =>
+      octokit.pulls.createReview({ ...prContext, commit_id: sha, body })
+    try {
+      const created = await attemptCreate(commit_id)
+      return { id: created.data.id, commitId: commit_id }
+    } catch (err) {
+      if (isDuplicatePendingReviewError(err)) {
+        const existing = await octokit.pulls.listReviews(prContext)
+        const pending = existing.data.find((r) => r.state === 'PENDING')
+        if (pending) {
+          debug(`Reusing existing pending review ${pending.id} (duplicate 422).`)
+          return {
+            id: pending.id,
+            commitId: pending.commit_id || commit_id,
+          }
         }
+        // Fall through to retry create after refresh
+      } else if (!isNotFoundError(err)) {
         throw err
       }
+      // For 404 or duplicate-without-found, refresh head SHA then retry once
+      debug('Refreshing pull request head SHA and retrying pending review create.')
+      const pr = await octokit.pulls.get(prContext)
+      const newSha = pr.data.head.sha
+      try {
+        const created = await attemptCreate(newSha)
+        return { id: created.data.id, commitId: newSha }
+      } catch (secondErr) {
+        if (isDuplicatePendingReviewError(secondErr)) {
+          const again = await octokit.pulls.listReviews(prContext)
+            ;
+          const pend = again.data.find((r) => r.state === 'PENDING')
+          if (pend) {
+            debug(
+              `Reusing pending review ${pend.id} after second duplicate on refreshed SHA.`
+            )
+            return {
+              id: pend.id,
+              commitId: pend.commit_id || newSha,
+            }
+          }
+        }
+        throw secondErr
+      }
     }
-    throw new Error('Unable to create pending review after purge attempts.')
   }
 
   /**
@@ -532,8 +546,8 @@ async function createReview({
         ? 'Batch review creation failed (422: one pending review per pull request). Falling back to pending review salvage path.'
         : 'Batch review creation failed (422: line must be part of the diff). Falling back to pending review with per-comment adds.'
     )
-    const reviewId = await purgeAndCreatePendingReview()
-    const salvageCommitId = commit_id
+    const { id: reviewId, commitId: salvageCommitId } =
+      await createOrReusePendingReview()
     let added = 0
     let skipped = 0
     for (const comment of comments) {
