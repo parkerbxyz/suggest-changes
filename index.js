@@ -463,9 +463,9 @@ export async function run({
     `Prepared ${comments.length} new suggestion comments (existing review comments: ${existingComments.length}).`
   )
   if (comments.length) {
-    info('Suggestion targets:')
+    debug('Suggestion targets:')
     for (const c of comments) {
-      info(`- ${c.path}:${formatLineRange(c.start_line, c.line)}`)
+      debug(`- ${c.path}:${formatLineRange(c.start_line, c.line)}`)
     }
   } else {
     return { comments: [], reviewCreated: false }
