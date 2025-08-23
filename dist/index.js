@@ -59352,7 +59352,7 @@ async function filterSuggestionsInPullRequestDiff({
     }
     const parsedPullRequestDiff = mjs(data)
     /** @type {Record<string, Set<number>>} */
-    const validRightLines = Object.fromEntries(
+    const rightSideAnchors = Object.fromEntries(
       parsedPullRequestDiff.files
         .filter((file) => file.type === 'ChangedFile')
         .map((file) => [
@@ -59375,7 +59375,7 @@ async function filterSuggestionsInPullRequestDiff({
     /** @type {ReviewCommentDraft[] | null} */
     let skippedSuggestions = null
     for (const comment of comments) {
-      const validLines = validRightLines[comment.path]
+      const validLines = rightSideAnchors[comment.path]
       const isValid =
         !!validLines &&
         validLines.has(comment.line) &&
@@ -59458,9 +59458,9 @@ async function run({
     `Prepared ${comments.length} new suggestion comments (existing review comments: ${existingComments.length}).`
   )
   if (comments.length) {
-    (0,core.info)('Suggestion targets:')
+    (0,core.debug)('Suggestion targets:')
     for (const c of comments) {
-      ;(0,core.info)(`- ${c.path}:${formatLineRange(c.start_line, c.line)}`)
+      ;(0,core.debug)(`- ${c.path}:${formatLineRange(c.start_line, c.line)}`)
     }
   } else {
     return { comments: [], reviewCreated: false }
