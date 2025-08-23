@@ -59301,7 +59301,7 @@ const processChunkChanges = (
     // Skip if comment already exists
     const commentKey = generateCommentKey(comment)
     if (existingCommentKeys.has(commentKey)) {
-      (0,core.debug)(
+      (0,core.info)(
         `Skipping duplicate suggestion ${comment.path}:${formatLineRange(
           comment.start_line,
           comment.line
@@ -59454,12 +59454,9 @@ async function run({
   const total = initialComments.length
   const skipped = total - comments.length
   ;(0,core.info)(
-    `Suggestions: posting ${
-      comments.length
-    }/${total} (skipped ${skipped}) unique suggestions; existing review comments: ${
-      existingComments.length
-    }; commit=${commit_id.slice(0, 7)}; event=${event}`
+    `Suggestions: posting ${comments.length}/${total} (skipped ${skipped}); existing review comments: ${existingComments.length}`
   )
+  ;(0,core.debug)(`Context: commit=${commit_id.slice(0, 7)} event=${event}`)
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
