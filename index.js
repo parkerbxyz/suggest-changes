@@ -194,8 +194,6 @@ export const generateSuggestionBody = (changes) => {
   // No additions means no content to suggest, except for pure deletions (empty replacement block)
   if (addedLines.length === 0) {
     if (deletedLines.length === 0) return null
-    // Default behavior: include pure deletion suggestions unless explicitly skipped
-    if (process.env.SUGGEST_CHANGES_SKIP_PURE_DELETIONS === 'true') return null
     return { body: createSuggestion(''), lineCount: deletedLines.length }
   }
 
@@ -329,7 +327,9 @@ export function generateReviewComments(
   existingCommentKeys = new Set()
 ) {
   const drafts = []
-  for (const { path, fromFileRange, group } of iterateSuggestionGroups(parsedDiff)) {
+  for (const { path, fromFileRange, group } of iterateSuggestionGroups(
+    parsedDiff
+  )) {
     const draft = buildCommentDraft(path, fromFileRange, group)
     if (draft) drafts.push(draft)
   }
@@ -338,7 +338,11 @@ export function generateReviewComments(
     (d) => !existingCommentKeys.has(generateCommentKey(d))
   )
   if (skipped.length) {
-    logSkipped('Skipped duplicate suggestions (already reviewed):', skipped)
+    logCommentList(
+      'Skipped duplicate suggestions (already reviewed):',
+      skipped,
+      info
+    )
   }
   return unique
 }
@@ -372,7 +376,7 @@ async function fetchCanonicalDiff(octokit, owner, repo, pull_number) {
     }
     return data
   } catch (err) {
-  debug(`PR diff fetch failed: ${formatError(err)}`)
+    debug(`PR diff fetch failed: ${formatError(err)}`)
     return null
   }
 }
@@ -421,27 +425,11 @@ function isValidSuggestion(comment, anchors) {
  * Log a list of review comment drafts with a standardized header.
  * @param {string} header
  * @param {ReviewCommentDraft[]} comments
- * @param {(msg: string) => void} [logFn]
+ * @param {(message: string) => void} [logger]
  */
-function logCommentList(header, comments, logFn = info) {
+function logCommentList(header, comments, logger = info) {
   if (!comments.length) return
-  logFn(`${header} ${comments.length}`)
-  for (const c of comments) {
-    logFn(`- ${c.path}:${formatLineRange(c.start_line, c.line)}`)
-  }
-}
-
-const logSkipped = (header, skipped) => logCommentList(header, skipped, info)
-
-/**
- * Log comment targets at a specified log level.
- * @param {ReviewCommentDraft[]} comments
- * @param {'debug' | 'info'} level
- */
-function logCommentTargets(comments, level = 'debug') {
-  if (!comments.length) return
-  const logger = level === 'info' ? info : debug
-  logger('Suggestion targets:')
+  logger(`${header} ${comments.length}`)
   for (const c of comments) {
     logger(`- ${c.path}:${formatLineRange(c.start_line, c.line)}`)
   }
@@ -473,16 +461,19 @@ async function filterSuggestionsInPullRequestDiff({
   try {
     parsedPullRequestDiff = parseGitDiff(diffString)
   } catch (err) {
-  warning(`PR diff parse failed: ${formatError(err)}`)
+    warning(`PR diff parse failed: ${formatError(err)}`)
     return comments
   }
 
   const rightSideAnchors = buildRightSideAnchors(parsedPullRequestDiff)
-  const { pass: valid, fail: skipped } = partition(
-    comments,
-    (c) => isValidSuggestion(c, rightSideAnchors)
+  const { pass: valid, fail: skipped } = partition(comments, (c) =>
+    isValidSuggestion(c, rightSideAnchors)
   )
-  logSkipped('Suggestions skipped because they are outside the PR diff:', skipped)
+  logCommentList(
+    'Suggestions skipped because they are outside the PR diff:',
+    skipped,
+    info
+  )
   return valid
 }
 
@@ -539,7 +530,7 @@ export async function run({
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
-  logCommentTargets(comments, 'debug')
+  logCommentList('Suggestion targets:', comments, debug)
   debug(`Creating review with ${comments.length} comments.`)
   try {
     await octokit.pulls.createReview({
