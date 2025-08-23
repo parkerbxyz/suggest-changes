@@ -59104,6 +59104,15 @@ function isLineOutsideDiffError(err) {
 }
 
 /**
+ * Normalize unknown error-like values to a concise string message.
+ * @param {unknown} err
+ * @returns {string}
+ */
+function formatError(err) {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/**
  * Filter changes by type for easier processing
  * @param {AnyLineChange[]} changes - Array of changes to filter
  * @returns {{addedLines: AddedLine[], deletedLines: DeletedLine[], unchangedLines: UnchangedLine[]}}
@@ -59180,8 +59189,6 @@ const generateSuggestionBody = (changes) => {
   // No additions means no content to suggest, except for pure deletions (empty replacement block)
   if (addedLines.length === 0) {
     if (deletedLines.length === 0) return null
-    // Default behavior: include pure deletion suggestions unless explicitly skipped
-    if (process.env.SUGGEST_CHANGES_SKIP_PURE_DELETIONS === 'true') return null
     return { body: createSuggestion(''), lineCount: deletedLines.length }
   }
 
@@ -59289,6 +59296,22 @@ function buildCommentDraft(path, fromFileRange, group) {
 }
 
 /**
+ * Partition an iterable into two arrays based on a predicate.
+ * @template T
+ * @param {Iterable<T>} items
+ * @param {(item: T) => boolean} predicate
+ * @returns {{pass: T[], fail: T[]}}
+ */
+function partition(items, predicate) {
+  /** @type {T[]} */ const pass = []
+  /** @type {T[]} */ const fail = []
+  for (const item of items) {
+    ;(predicate(item) ? pass : fail).push(item)
+  }
+  return { pass, fail }
+}
+
+/**
  * Generate GitHub review comments from a parsed diff (exported for testing)
  * @param {ReturnType<typeof parseGitDiff>} parsedDiff - Parsed diff from parse-git-diff
  * @param {Set<string>} existingCommentKeys - Set of existing comment keys to avoid duplicates
@@ -59298,64 +59321,44 @@ function generateReviewComments(
   parsedDiff,
   existingCommentKeys = new Set()
 ) {
-  /** @type {ReviewCommentDraft[]} */
-  const unique = []
-  /** @type {ReviewCommentDraft[]} */
-  const skipped = []
-  // Iterate lazily over groups via generator
+  const drafts = []
   for (const { path, fromFileRange, group } of iterateSuggestionGroups(
     parsedDiff
   )) {
     const draft = buildCommentDraft(path, fromFileRange, group)
-    if (!draft) continue
-    const key = generateCommentKey(draft)
-    if (existingCommentKeys.has(key)) {
-      skipped.push(draft)
-    } else {
-      unique.push(draft)
-    }
+    if (draft) drafts.push(draft)
   }
+  const { pass: unique, fail: skipped } = partition(
+    drafts,
+    (d) => !existingCommentKeys.has(generateCommentKey(d))
+  )
   if (skipped.length) {
-    (0,core.debug)('Skipped duplicate suggestions:')
-    for (const duplicate of skipped) {
-      ;(0,core.debug)(
-        `- ${duplicate.path}:${formatLineRange(
-          duplicate.start_line,
-          duplicate.line
-        )}`
-      )
-    }
+    logCommentList(
+      'Skipped duplicate suggestions (already reviewed):',
+      skipped,
+      core.info
+    )
   }
   return unique
 }
 
 /**
- * Filters suggestion comments using the canonical server-side PR diff.
- * Returns a new array containing only valid suggestions and logs summary info.
- * Gracefully falls back (returns original comments) if the diff cannot be fetched/parsed.
- * @param {Object} params
- * @param {Octokit} params.octokit
- * @param {string} params.owner
- * @param {string} params.repo
- * @param {number} params.pull_number
- * @param {Array<ReviewCommentDraft>} params.comments
- * @returns {Promise<Array<ReviewCommentDraft>>}
+ * Fetch the canonical PR diff as a string or return null on failure/unavailability.
+ * @param {Octokit} octokit
+ * @param {string} owner
+ * @param {string} repo
+ * @param {number} pull_number
+ * @returns {Promise<string | null>}
  */
-async function filterSuggestionsInPullRequestDiff({
-  octokit,
-  owner,
-  repo,
-  pull_number,
-  comments,
-}) {
+async function fetchCanonicalDiff(octokit, owner, repo, pull_number) {
+  if (
+    !octokit.pulls ||
+    typeof (/** @type {any} */ octokit.pulls.get) !== 'function'
+  ) {
+    (0,core.debug)('PR diff filter: pulls.get unavailable; skipping.')
+    return null
+  }
   try {
-    if (
-      !octokit.pulls ||
-      typeof (/** @type {any} */ (octokit).pulls.get) !== 'function'
-    ) {
-      (0,core.debug)('PR diff filter: pulls.get unavailable; skipping.')
-      return comments
-    }
     const { data } = await /** @type {any} */ (octokit).pulls.get({
       owner,
       repo,
@@ -59364,68 +59367,109 @@ async function filterSuggestionsInPullRequestDiff({
     })
     if (typeof data !== 'string' || !/^diff --git /.test(data)) {
       (0,core.debug)('PR diff filter: no usable diff string; skipping.')
-      return comments
+      return null
     }
-    const parsedPullRequestDiff = mjs(data)
-    /** @type {Record<string, Set<number>>} */
-    const rightSideAnchors = Object.fromEntries(
-      parsedPullRequestDiff.files
-        .filter((file) => file.type === 'ChangedFile')
-        .map((file) => [
-          file.path,
-          new Set(
-            file.chunks
-              .filter((chunk) => chunk.type === 'Chunk')
-              .flatMap((chunk) =>
-                chunk.changes
-                  .filter(
-                    (change) => isAddedLine(change) || isUnchangedLine(change)
-                  )
-                  .map((change) => change.lineAfter)
-              )
-          ),
-        ])
-    )
-    /** @type {ReviewCommentDraft[]} */
-    const validSuggestions = []
-    /** @type {ReviewCommentDraft[] | null} */
-    let skippedSuggestions = null
-    for (const comment of comments) {
-      const validLines = rightSideAnchors[comment.path]
-      const isValid =
-        !!validLines &&
-        validLines.has(comment.line) &&
-        (comment.start_line === undefined || validLines.has(comment.start_line))
-      if (isValid) {
-        validSuggestions.push(comment)
-      } else {
-        if (!skippedSuggestions) skippedSuggestions = []
-        skippedSuggestions.push(comment)
-      }
-    }
-    const total = comments.length
-    const validCount = validSuggestions.length
-    const skippedCount = total - validCount
-    if (skippedCount && skippedSuggestions) {
-      (0,core.debug)('Skipped (outside PR diff):')
-      for (const suggestion of skippedSuggestions) {
-        ;(0,core.debug)(
-          `- ${suggestion.path}:${formatLineRange(
-            suggestion.start_line,
-            suggestion.line
-          )}`
-        )
-      }
-    }
-    return validSuggestions
+    return data
   } catch (err) {
-    (0,core.debug)(
-      `PR diff filter failed: ${
-        err instanceof Error ? err.message : String(err)
-      }`
-    )
+    (0,core.debug)(`PR diff fetch failed: ${formatError(err)}`)
+    return null
+  }
+}
+
+/**
+ * Build a lookup of valid right-side line numbers per file path.
+ * @param {ReturnType<typeof parseGitDiff>} parsedDiff
+ * @returns {Record<string, Set<number>>}
+ */
+function buildRightSideAnchors(parsedDiff) {
+  return Object.fromEntries(
+    parsedDiff.files
+      .filter((file) => file.type === 'ChangedFile')
+      .map((file) => [
+        file.path,
+        new Set(
+          file.chunks
+            .filter((chunk) => chunk.type === 'Chunk')
+            .flatMap((chunk) =>
+              chunk.changes
+                .filter(
+                  (change) => isAddedLine(change) || isUnchangedLine(change)
+                )
+                .map((change) => change.lineAfter)
+            )
+        ),
+      ])
+  )
+}
+
+/**
+ * Determine if a review comment draft is valid within the PR diff.
+ * @param {ReviewCommentDraft} comment
+ * @param {Record<string, Set<number>>} anchors
+ */
+function isValidSuggestion(comment, anchors) {
+  const validLines = anchors[comment.path]
+  if (!validLines) return false
+  if (!validLines.has(comment.line)) return false
+  if (comment.start_line !== undefined && !validLines.has(comment.start_line))
+    return false
+  return true
+}
+
+/**
+ * Log a list of review comment drafts with a standardized header.
+ * @param {string} header
+ * @param {ReviewCommentDraft[]} comments
+ * @param {(message: string) => void} [logger]
+ */
+function logCommentList(header, comments, logger = core.info) {
+  if (!comments.length) return
+  logger(`${header} ${comments.length}`)
+  for (const c of comments) {
+    logger(`- ${c.path}:${formatLineRange(c.start_line, c.line)}`)
+  }
+}
+
+async function filterSuggestionsInPullRequestDiff({
+  octokit,
+  owner,
+  repo,
+  pull_number,
+  comments,
+}) {
+  /**
+   * Filters suggestion comments using the canonical server-side PR diff.
+   * Returns a new array containing only valid suggestions and logs summary info.
+   * Gracefully falls back (returns original comments) if the diff cannot be fetched/parsed.
+   * @param {Object} params
+   * @param {Octokit} params.octokit
+   * @param {string} params.owner
+   * @param {string} params.repo
+   * @param {number} params.pull_number
+   * @param {Array<ReviewCommentDraft>} params.comments
+   * @returns {Promise<Array<ReviewCommentDraft>>}
+   */
+  const diffString = await fetchCanonicalDiff(octokit, owner, repo, pull_number)
+  if (!diffString) return comments
+
+  let parsedPullRequestDiff
+  try {
+    parsedPullRequestDiff = mjs(diffString)
+  } catch (err) {
+    (0,core.warning)(`PR diff parse failed: ${formatError(err)}`)
     return comments
   }
+
+  const rightSideAnchors = buildRightSideAnchors(parsedPullRequestDiff)
+  const { pass: valid, fail: skipped } = partition(comments, (c) =>
+    isValidSuggestion(c, rightSideAnchors)
+  )
+  logCommentList(
+    'Suggestions skipped because they are outside the PR diff:',
+    skipped,
+    core.info
+  )
+  return valid
 }
 
 /**
@@ -59481,13 +59525,8 @@ async function run({
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
-  (0,core.debug)('Suggestion targets:')
-  for (const comment of comments) {
-    ;(0,core.debug)(
-      `- ${comment.path}:${formatLineRange(comment.start_line, comment.line)}`
-    )
-  }
-  (0,core.debug)(`Creating review with ${comments.length} comments.`)
+  logCommentList('Suggestion targets:', comments, core.debug)
+  ;(0,core.debug)(`Creating review with ${comments.length} comments.`)
   try {
     await octokit.pulls.createReview({
       owner,
