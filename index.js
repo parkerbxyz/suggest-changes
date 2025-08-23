@@ -109,6 +109,15 @@ function isLineOutsideDiffError(err) {
 }
 
 /**
+ * Normalize unknown error-like values to a concise string message.
+ * @param {unknown} err
+ * @returns {string}
+ */
+function formatError(err) {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/**
  * Filter changes by type for easier processing
  * @param {AnyLineChange[]} changes - Array of changes to filter
  * @returns {{addedLines: AddedLine[], deletedLines: DeletedLine[], unchangedLines: UnchangedLine[]}}
@@ -294,6 +303,22 @@ function buildCommentDraft(path, fromFileRange, group) {
 }
 
 /**
+ * Partition an iterable into two arrays based on a predicate.
+ * @template T
+ * @param {Iterable<T>} items
+ * @param {(item: T) => boolean} predicate
+ * @returns {{pass: T[], fail: T[]}}
+ */
+function partition(items, predicate) {
+  /** @type {T[]} */ const pass = []
+  /** @type {T[]} */ const fail = []
+  for (const item of items) {
+    ;(predicate(item) ? pass : fail).push(item)
+  }
+  return { pass, fail }
+}
+
+/**
  * Generate GitHub review comments from a parsed diff (exported for testing)
  * @param {ReturnType<typeof parseGitDiff>} parsedDiff - Parsed diff from parse-git-diff
  * @param {Set<string>} existingCommentKeys - Set of existing comment keys to avoid duplicates
@@ -303,25 +328,17 @@ export function generateReviewComments(
   parsedDiff,
   existingCommentKeys = new Set()
 ) {
-  /** @type {ReviewCommentDraft[]} */
-  const unique = []
-  /** @type {ReviewCommentDraft[]} */
-  const skipped = []
-  // Iterate lazily over groups via generator
-  for (const { path, fromFileRange, group } of iterateSuggestionGroups(
-    parsedDiff
-  )) {
+  const drafts = []
+  for (const { path, fromFileRange, group } of iterateSuggestionGroups(parsedDiff)) {
     const draft = buildCommentDraft(path, fromFileRange, group)
-    if (!draft) continue
-    const key = generateCommentKey(draft)
-    if (existingCommentKeys.has(key)) {
-      skipped.push(draft)
-    } else {
-      unique.push(draft)
-    }
+    if (draft) drafts.push(draft)
   }
+  const { pass: unique, fail: skipped } = partition(
+    drafts,
+    (d) => !existingCommentKeys.has(generateCommentKey(d))
+  )
   if (skipped.length) {
-    logSkipped('Duplicate suggestions skipped:', skipped)
+    logSkipped('Skipped duplicate suggestions (already reviewed):', skipped)
   }
   return unique
 }
@@ -355,11 +372,7 @@ async function fetchCanonicalDiff(octokit, owner, repo, pull_number) {
     }
     return data
   } catch (err) {
-    debug(
-      `PR diff fetch failed: ${
-        err instanceof Error ? err.message : String(err)
-      }`
-    )
+  debug(`PR diff fetch failed: ${formatError(err)}`)
     return null
   }
 }
@@ -405,20 +418,32 @@ function isValidSuggestion(comment, anchors) {
 }
 
 /**
- * Log skipped suggestions list
+ * Log a list of review comment drafts with a standardized header.
  * @param {string} header
- * @param {ReviewCommentDraft[]} skipped
+ * @param {ReviewCommentDraft[]} comments
+ * @param {(msg: string) => void} [logFn]
  */
-function logSkipped(header, skipped) {
-  if (!skipped.length) return
-  info(`${header} ${skipped.length}`)
-  for (const suggestion of skipped) {
-    info(
-      `- ${suggestion.path}:${formatLineRange(
-        suggestion.start_line,
-        suggestion.line
-      )}`
-    )
+function logCommentList(header, comments, logFn = info) {
+  if (!comments.length) return
+  logFn(`${header} ${comments.length}`)
+  for (const c of comments) {
+    logFn(`- ${c.path}:${formatLineRange(c.start_line, c.line)}`)
+  }
+}
+
+const logSkipped = (header, skipped) => logCommentList(header, skipped, info)
+
+/**
+ * Log comment targets at a specified log level.
+ * @param {ReviewCommentDraft[]} comments
+ * @param {'debug' | 'info'} level
+ */
+function logCommentTargets(comments, level = 'debug') {
+  if (!comments.length) return
+  const logger = level === 'info' ? info : debug
+  logger('Suggestion targets:')
+  for (const c of comments) {
+    logger(`- ${c.path}:${formatLineRange(c.start_line, c.line)}`)
   }
 }
 
@@ -448,30 +473,16 @@ async function filterSuggestionsInPullRequestDiff({
   try {
     parsedPullRequestDiff = parseGitDiff(diffString)
   } catch (err) {
-    warning(
-      `PR diff parse failed: ${
-        err instanceof Error ? err.message : String(err)
-      }`
-    )
+  warning(`PR diff parse failed: ${formatError(err)}`)
     return comments
   }
 
   const rightSideAnchors = buildRightSideAnchors(parsedPullRequestDiff)
-  /** @type {ReviewCommentDraft[]} */
-  const valid = []
-  /** @type {ReviewCommentDraft[]} */
-  const skipped = []
-  for (const comment of comments) {
-    if (isValidSuggestion(comment, rightSideAnchors)) {
-      valid.push(comment)
-    } else {
-      skipped.push(comment)
-    }
-  }
-  logSkipped(
-    'Suggestions skipped because they are outside the PR diff:',
-    skipped
+  const { pass: valid, fail: skipped } = partition(
+    comments,
+    (c) => isValidSuggestion(c, rightSideAnchors)
   )
+  logSkipped('Suggestions skipped because they are outside the PR diff:', skipped)
   return valid
 }
 
@@ -528,12 +539,7 @@ export async function run({
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
-  debug('Suggestion targets:')
-  for (const comment of comments) {
-    debug(
-      `- ${comment.path}:${formatLineRange(comment.start_line, comment.line)}`
-    )
-  }
+  logCommentTargets(comments, 'debug')
   debug(`Creating review with ${comments.length} comments.`)
   try {
     await octokit.pulls.createReview({
