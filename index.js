@@ -395,15 +395,10 @@ async function filterSuggestionsInPullRequestDiff({
     const total = comments.length
     const validCount = validSuggestions.length
     const skippedCount = total - validCount
-    if (total) {
-      info(
-        `Diff validation: valid ${validCount}/${total} (skipped ${skippedCount}).`
-      )
-      if (skippedCount && skippedSuggestions) {
-        debug('Skipped (outside PR diff):')
-        for (const s of skippedSuggestions) {
-          debug(`- ${s.path}:${formatLineRange(s.start_line, s.line)}`)
-        }
+    if (skippedCount && skippedSuggestions) {
+      debug('Skipped (outside PR diff):')
+      for (const s of skippedSuggestions) {
+        debug(`- ${s.path}:${formatLineRange(s.start_line, s.line)}`)
       }
     }
     return validSuggestions
@@ -450,31 +445,36 @@ export async function run({
   // Parse diff after collecting existing comment keys
   const parsedDiff = parseGitDiff(diff)
 
-  let comments = generateReviewComments(parsedDiff, existingCommentKeys)
-  // PR diff canonical filtering: fetch server-side diff, ensure anchors exist on RIGHT side there.
-  comments = await filterSuggestionsInPullRequestDiff({
+  const initialComments = generateReviewComments(
+    parsedDiff,
+    existingCommentKeys
+  )
+  const comments = await filterSuggestionsInPullRequestDiff({
     octokit,
     owner,
     repo,
     pull_number,
-    comments,
+    comments: initialComments,
   })
+  const total = initialComments.length
+  const skipped = total - comments.length
   info(
-    `Prepared ${comments.length} new suggestion comments (existing review comments: ${existingComments.length}).`
+    `Suggestions: posting ${
+      comments.length
+    }/${total} (skipped ${skipped}) unique suggestions; existing review comments: ${
+      existingComments.length
+    }; commit=${commit_id.slice(0, 7)}; event=${event}`
   )
-  if (comments.length) {
-    debug('Suggestion targets:')
-    for (const c of comments) {
-      debug(`- ${c.path}:${formatLineRange(c.start_line, c.line)}`)
-    }
-  } else {
+  if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
-  debug(
-    `Attempting to create a review with ${comments.length} comments
-commit=${commit_id.slice(0, 7)}
-event=${event}`
-  )
+  debug('Suggestion targets:')
+  for (const comment of comments) {
+    debug(
+      `- ${comment.path}:${formatLineRange(comment.start_line, comment.line)}`
+    )
+  }
+  debug(`Creating review with ${comments.length} comments.`)
   try {
     await octokit.pulls.createReview({
       owner,
