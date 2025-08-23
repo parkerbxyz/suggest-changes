@@ -319,6 +319,105 @@ const processChunkChanges = (
 }
 
 /**
+ * Filters suggestion comments using the canonical server-side PR diff.
+ * Returns a new array containing only valid suggestions and logs summary info.
+ * Gracefully falls back (returns original comments) if the diff cannot be fetched/parsed.
+ * @param {Object} params
+ * @param {Octokit} params.octokit
+ * @param {string} params.owner
+ * @param {string} params.repo
+ * @param {number} params.pull_number
+ * @param {Array<ReviewCommentDraft>} params.comments
+ * @returns {Promise<Array<ReviewCommentDraft>>}
+ */
+async function filterSuggestionsInPullRequestDiff({
+  octokit,
+  owner,
+  repo,
+  pull_number,
+  comments,
+}) {
+  try {
+    if (typeof (/** @type {any} */ (octokit).request) !== 'function') {
+      debug('PR diff filter: request API unavailable; skipping.')
+      return comments
+    }
+    const { data } = await /** @type {any} */ (octokit).request(
+      'GET /repos/{owner}/{repo}/pulls/{pull_number}',
+      {
+        owner,
+        repo,
+        pull_number,
+        headers: { accept: 'application/vnd.github.v3.diff' },
+      }
+    )
+    if (typeof data !== 'string' || !/^diff --git /.test(data)) {
+      debug('PR diff filter: no usable diff string; skipping.')
+      return comments
+    }
+    const parsedPullRequestDiff = parseGitDiff(data)
+    /** @type {Record<string, Set<number>>} */
+    const validRightLines = Object.fromEntries(
+      parsedPullRequestDiff.files
+        .filter((file) => file.type === 'ChangedFile')
+        .map((file) => [
+          file.path,
+          new Set(
+            file.chunks
+              .filter((chunk) => chunk.type === 'Chunk')
+              .flatMap((chunk) =>
+                chunk.changes
+                  .filter(
+                    (change) => isAddedLine(change) || isUnchangedLine(change)
+                  )
+                  .map((change) => change.lineAfter)
+              )
+          ),
+        ])
+    )
+    /** @type {ReviewCommentDraft[]} */
+    const validSuggestions = []
+    /** @type {ReviewCommentDraft[] | null} */
+    let skippedSuggestions = null
+    for (const comment of comments) {
+      const validLines = validRightLines[comment.path]
+      const isValid =
+        !!validLines &&
+        validLines.has(comment.line) &&
+        (comment.start_line === undefined || validLines.has(comment.start_line))
+      if (isValid) {
+        validSuggestions.push(comment)
+      } else {
+        if (!skippedSuggestions) skippedSuggestions = []
+        skippedSuggestions.push(comment)
+      }
+    }
+    const total = comments.length
+    const validCount = validSuggestions.length
+    const skippedCount = total - validCount
+    if (total) {
+      info(
+        `Diff validation: valid ${validCount}/${total} (skipped ${skippedCount}).`
+      )
+      if (skippedCount && skippedSuggestions) {
+        debug('Skipped (outside PR diff):')
+        for (const s of skippedSuggestions) {
+          debug(`- ${s.path}:${formatLineRange(s.start_line, s.line)}`)
+        }
+      }
+    }
+    return validSuggestions
+  } catch (err) {
+    debug(
+      `PR diff filter failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    )
+    return comments
+  }
+}
+
+/**
  * Main execution function for the GitHub Action
  * @param {Object} options - Configuration options
  * @param {Octokit} options.octokit - Octokit instance
@@ -360,106 +459,6 @@ export async function run({
     pull_number,
     comments,
   })
-  /**
-   * Filters suggestion comments using the canonical server-side PR diff.
-   * Returns a new array containing only valid suggestions and logs summary info.
-   * @param {Object} params
-   * @param {Octokit} params.octokit
-   * @param {string} params.owner
-   * @param {string} params.repo
-   * @param {number} params.pull_number
-   * @param {Array<ReviewCommentDraft>} params.comments
-   * @returns {Promise<Array<ReviewCommentDraft>>}
-   */
-  async function filterSuggestionsInPullRequestDiff({
-    octokit,
-    owner,
-    repo,
-    pull_number,
-    comments,
-  }) {
-    try {
-      const pullRequestDiff = /** @type {string} */ (
-        await /** @type {any} */ (octokit).request(
-          'GET /repos/{owner}/{repo}/pulls/{pull_number}',
-          {
-            owner,
-            repo,
-            pull_number,
-            headers: { accept: 'application/vnd.github.v3.diff' },
-          }
-        )
-      )
-      if (!pullRequestDiff || !pullRequestDiff.startsWith('diff --git')) {
-        debug(
-          'PR diff filter: unexpected server diff format; skipping canonical filtering.'
-        )
-        return comments
-      }
-      const parsedPullRequestDiff = parseGitDiff(pullRequestDiff)
-      /** @type {Record<string, Set<number>>} */
-      const validRightLines = Object.fromEntries(
-        parsedPullRequestDiff.files
-          .filter((file) => file.type === 'ChangedFile')
-          .map((file) => [
-            file.path,
-            new Set(
-              file.chunks
-                .filter((chunk) => chunk.type === 'Chunk')
-                .flatMap((chunk) =>
-                  chunk.changes
-                    .filter(
-                      (change) => isAddedLine(change) || isUnchangedLine(change)
-                    )
-                    .map((change) => change.lineAfter)
-                )
-            ),
-          ])
-      )
-      const initialSuggestionCount = comments.length
-      /** @type {ReviewCommentDraft[]} */
-      const validSuggestions = []
-      /** @type {ReviewCommentDraft[]} */
-      const skippedSuggestions = []
-      for (const comment of comments) {
-        const validLines = validRightLines[comment.path]
-        const isValid =
-          !!validLines &&
-          validLines.has(comment.line) &&
-          (comment.start_line === undefined || validLines.has(comment.start_line))
-        if (isValid) {
-          validSuggestions.push(comment)
-        } else {
-          skippedSuggestions.push(comment)
-        }
-      }
-      const validSuggestionCount = validSuggestions.length
-      const invalidSuggestionCount =
-        initialSuggestionCount - validSuggestionCount
-      if (initialSuggestionCount > 0) {
-        debug(
-          `Number of valid suggestions: ${validSuggestionCount} of ${initialSuggestionCount}.`
-        )
-        if (invalidSuggestionCount > 0) {
-          debug(
-            `Number of suggestions skipped because they are not part of the pull request diff: ${invalidSuggestionCount} of ${initialSuggestionCount}`
-          )
-          info('Suggestions skipped because they are not part of pull request diff:')
-          for (const s of skippedSuggestions) {
-            info(`- ${s.path}:${formatLineRange(s.start_line, s.line)}`)
-          }
-        }
-      }
-      return validSuggestions
-    } catch (err) {
-      debug(
-        `PR diff filter failed: ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      )
-      return comments
-    }
-  }
   info(
     `Prepared ${comments.length} new suggestion comments (existing review comments: ${existingComments.length}).`
   )
