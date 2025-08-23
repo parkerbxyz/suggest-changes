@@ -338,19 +338,19 @@ async function filterSuggestionsInPullRequestDiff({
   comments,
 }) {
   try {
-    if (typeof (/** @type {any} */ (octokit).request) !== 'function') {
-      debug('PR diff filter: request API unavailable; skipping.')
+    if (
+      !octokit.pulls ||
+      typeof (/** @type {any} */ (octokit).pulls.get) !== 'function'
+    ) {
+      debug('PR diff filter: pulls.get unavailable; skipping.')
       return comments
     }
-    const { data } = await /** @type {any} */ (octokit).request(
-      'GET /repos/{owner}/{repo}/pulls/{pull_number}',
-      {
-        owner,
-        repo,
-        pull_number,
-        headers: { accept: 'application/vnd.github.v3.diff' },
-      }
-    )
+    const { data } = await /** @type {any} */ (octokit).pulls.get({
+      owner,
+      repo,
+      pull_number,
+      headers: { accept: 'application/vnd.github.v3.diff' },
+    })
     if (typeof data !== 'string' || !/^diff --git /.test(data)) {
       debug('PR diff filter: no usable diff string; skipping.')
       return comments
