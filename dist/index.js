@@ -59241,6 +59241,54 @@ const generateCommentKey = (comment) =>
   }`
 
 /**
+ * Lazily iterate over all suggestion groups in a parsed diff.
+ * Yields objects containing path, fromFileRange, and group changes.
+ * @param {ReturnType<typeof parseGitDiff>} parsedDiff
+ */
+function* iterateSuggestionGroups(parsedDiff) {
+  for (const file of parsedDiff.files) {
+    if (file.type !== 'ChangedFile') continue
+    const path = file.path
+    for (const chunk of file.chunks) {
+      if (chunk.type !== 'Chunk') continue
+      const { fromFileRange, changes } = chunk
+      const groups = groupChangesForSuggestions(changes)
+      for (const group of groups) {
+        yield { path, fromFileRange, group }
+      }
+    }
+  }
+}
+
+/**
+ * Build a review comment draft from a suggestion group.
+ * Returns null if the group does not produce a valid suggestion body.
+ * @param {string} path
+ * @param {{start: number}} fromFileRange
+ * @param {AnyLineChange[]} group
+ * @returns {ReviewCommentDraft | null}
+ */
+function buildCommentDraft(path, fromFileRange, group) {
+  const suggestion = generateSuggestionBody(group)
+  if (!suggestion) return null
+  const { body, lineCount } = suggestion
+  const { startLine, endLine } = calculateLinePosition(
+    group,
+    lineCount,
+    fromFileRange
+  )
+  return /** @type {ReviewCommentDraft} */ ({
+    path,
+    body,
+    line: endLine,
+    ...(lineCount > 1 && {
+      start_line: startLine,
+      start_side: 'RIGHT',
+    }),
+  })
+}
+
+/**
  * Generate GitHub review comments from a parsed diff (exported for testing)
  * @param {ReturnType<typeof parseGitDiff>} parsedDiff - Parsed diff from parse-git-diff
  * @param {Set<string>} existingCommentKeys - Set of existing comment keys to avoid duplicates
@@ -59250,67 +59298,35 @@ function generateReviewComments(
   parsedDiff,
   existingCommentKeys = new Set()
 ) {
-  return parsedDiff.files
-    .filter((file) => file.type === 'ChangedFile')
-    .flatMap(({ path, chunks }) =>
-      chunks
-        .filter((chunk) => chunk.type === 'Chunk')
-        .flatMap(({ fromFileRange, changes }) =>
-          processChunkChanges(path, fromFileRange, changes, existingCommentKeys)
-        )
-    )
-}
-
-/**
- * Process changes within a chunk to generate review comments
- * @param {string} path - File path
- * @param {{start: number}} fromFileRange - File range information
- * @param {AnyLineChange[]} changes - Changes in the chunk
- * @param {Set<string>} existingCommentKeys - Set of existing comment keys
- * @returns {Array<ReviewCommentDraft>} Generated comments
- */
-const processChunkChanges = (
-  path,
-  fromFileRange,
-  changes,
-  existingCommentKeys
-) => {
-  const suggestionGroups = groupChangesForSuggestions(changes)
-
-  return suggestionGroups.flatMap((groupChanges) => {
-    const suggestionBody = generateSuggestionBody(groupChanges)
-
-    // Skip if no suggestion was generated
-    if (!suggestionBody) return []
-
-    const { body, lineCount } = suggestionBody
-    const { startLine, endLine } = calculateLinePosition(
-      groupChanges,
-      lineCount,
-      fromFileRange
-    )
-
-    // Create comment with conditional multi-line properties
-    const comment = /** @type {ReviewCommentDraft} */ ({
-      path,
-      body,
-      line: endLine,
-      ...(lineCount > 1 && { start_line: startLine, start_side: 'RIGHT' }),
-    })
-
-    // Skip if comment already exists
-    const commentKey = generateCommentKey(comment)
-    if (existingCommentKeys.has(commentKey)) {
-      (0,core.info)(
-        `Skipping duplicate suggestion ${comment.path}:${formatLineRange(
-          comment.start_line,
-          comment.line
+  /** @type {ReviewCommentDraft[]} */
+  const unique = []
+  /** @type {ReviewCommentDraft[]} */
+  const skipped = []
+  // Iterate lazily over groups via generator
+  for (const { path, fromFileRange, group } of iterateSuggestionGroups(
+    parsedDiff
+  )) {
+    const draft = buildCommentDraft(path, fromFileRange, group)
+    if (!draft) continue
+    const key = generateCommentKey(draft)
+    if (existingCommentKeys.has(key)) {
+      skipped.push(draft)
+    } else {
+      unique.push(draft)
+    }
+  }
+  if (skipped.length) {
+    (0,core.debug)('Skipped duplicate suggestions:')
+    for (const duplicate of skipped) {
+      ;(0,core.debug)(
+        `- ${duplicate.path}:${formatLineRange(
+          duplicate.start_line,
+          duplicate.line
         )}`
       )
-      return []
     }
-    return [comment]
-  })
+  }
+  return unique
 }
 
 /**
@@ -59392,8 +59408,13 @@ async function filterSuggestionsInPullRequestDiff({
     const skippedCount = total - validCount
     if (skippedCount && skippedSuggestions) {
       (0,core.debug)('Skipped (outside PR diff):')
-      for (const s of skippedSuggestions) {
-        ;(0,core.debug)(`- ${s.path}:${formatLineRange(s.start_line, s.line)}`)
+      for (const suggestion of skippedSuggestions) {
+        ;(0,core.debug)(
+          `- ${suggestion.path}:${formatLineRange(
+            suggestion.start_line,
+            suggestion.line
+          )}`
+        )
       }
     }
     return validSuggestions
