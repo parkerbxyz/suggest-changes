@@ -357,7 +357,7 @@ async function filterSuggestionsInPullRequestDiff({
     }
     const parsedPullRequestDiff = parseGitDiff(data)
     /** @type {Record<string, Set<number>>} */
-    const validRightLines = Object.fromEntries(
+    const rightSideAnchors = Object.fromEntries(
       parsedPullRequestDiff.files
         .filter((file) => file.type === 'ChangedFile')
         .map((file) => [
@@ -380,7 +380,7 @@ async function filterSuggestionsInPullRequestDiff({
     /** @type {ReviewCommentDraft[] | null} */
     let skippedSuggestions = null
     for (const comment of comments) {
-      const validLines = validRightLines[comment.path]
+      const validLines = rightSideAnchors[comment.path]
       const isValid =
         !!validLines &&
         validLines.has(comment.line) &&
