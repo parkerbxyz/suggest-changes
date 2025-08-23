@@ -417,22 +417,22 @@ export async function run({
           ])
       )
       const initialSuggestionCount = comments.length
-      const validSuggestions = comments.filter((comment) => {
+      /** @type {ReviewCommentDraft[]} */
+      const validSuggestions = []
+      /** @type {ReviewCommentDraft[]} */
+      const skippedSuggestions = []
+      for (const comment of comments) {
         const validLines = validRightLines[comment.path]
         const isValid =
           !!validLines &&
           validLines.has(comment.line) &&
-          (comment.start_line === undefined ||
-            validLines.has(comment.start_line))
-        if (!isValid) {
-          debug(
-            `Skipping suggestion because it is not part of the pull request diff:) ${
-              comment.path
-            }:${formatLineRange(comment.start_line, comment.line)}`
-          )
+          (comment.start_line === undefined || validLines.has(comment.start_line))
+        if (isValid) {
+          validSuggestions.push(comment)
+        } else {
+          skippedSuggestions.push(comment)
         }
-        return isValid
-      })
+      }
       const validSuggestionCount = validSuggestions.length
       const invalidSuggestionCount =
         initialSuggestionCount - validSuggestionCount
@@ -441,9 +441,13 @@ export async function run({
           `Number of valid suggestions: ${validSuggestionCount} of ${initialSuggestionCount}.`
         )
         if (invalidSuggestionCount > 0) {
-          info(
+          debug(
             `Number of suggestions skipped because they are not part of the pull request diff: ${invalidSuggestionCount} of ${initialSuggestionCount}`
           )
+          info('Suggestions skipped because they are not part of pull request diff:')
+          for (const s of skippedSuggestions) {
+            info(`- ${s.path}:${formatLineRange(s.start_line, s.line)}`)
+          }
         }
       }
       return validSuggestions
@@ -456,24 +460,21 @@ export async function run({
       return comments
     }
   }
-  debug(
+  info(
     `Prepared ${comments.length} new suggestion comments (existing review comments: ${existingComments.length}).`
   )
   if (comments.length) {
-    const sample = comments
-      .slice(0, 8)
-      .map((c) => `${c.path}:${formatLineRange(c.start_line, c.line)}`)
-      .join(', ')
-    debug(`Sample targets (first up to 8): ${sample}`)
-  }
-  if (comments.length === 0) {
+    info('Suggestion targets:')
+    for (const c of comments) {
+      info(`- ${c.path}:${formatLineRange(c.start_line, c.line)}`)
+    }
+  } else {
     return { comments: [], reviewCreated: false }
   }
   debug(
-    `Batch create attempt: ${comments.length} comments commit=${commit_id.slice(
-      0,
-      7
-    )} event=${event}`
+    `Attempting to create a review with ${comments.length} comments
+commit=${commit_id.slice(0, 7)}
+event=${event}`
   )
   try {
     await octokit.pulls.createReview({
