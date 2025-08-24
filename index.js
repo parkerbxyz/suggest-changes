@@ -523,17 +523,14 @@ export async function run({
     pull_number,
     comments: initialComments,
   })
-  const total = initialComments.length
-  const skipped = total - comments.length
-  info(
-    `Suggestions: posting ${comments.length}/${total} (skipped ${skipped}); existing review comments: ${existingComments.length}`
+  logCommentList(
+    `Creating review with ${comments.length} suggestions:`,
+    comments,
+    info
   )
-  debug(`Context: commit=${commit_id.slice(0, 7)} event=${event}`)
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
-  logCommentList('Suggestion targets:', comments, debug)
-  debug(`Creating review with ${comments.length} comments.`)
   try {
     await octokit.pulls.createReview({
       owner,
