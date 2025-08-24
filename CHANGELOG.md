@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.7...v3.0.0) (2025-08-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* This requires Actions Runner v2.327.1 or later if you are using a self-hosted runner.
+
+### Features
+
+* use `node24` runner ([#91](https://github.com/parkerbxyz/suggest-changes/issues/91)) ([b68873c](https://github.com/parkerbxyz/suggest-changes/commit/b68873c1ed30765e49eb376345ef48f1a43676be))
+
 ## [2.0.7](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.6...v2.0.7) (2025-08-24)
 
 
