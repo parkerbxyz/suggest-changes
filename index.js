@@ -335,7 +335,7 @@ export function generateReviewComments(
   }
   const { pass: unique, fail: skipped } = partition(
     drafts,
-    (d) => !existingCommentKeys.has(generateCommentKey(d))
+    (draft) => !existingCommentKeys.has(generateCommentKey(draft))
   )
   if (skipped.length) {
     logCommentList(
@@ -430,8 +430,10 @@ function isValidSuggestion(comment, anchors) {
 function logCommentList(header, comments, logger = info) {
   if (!comments.length) return
   logger(`${header} ${comments.length}`)
-  for (const c of comments) {
-    logger(`- ${c.path}:${formatLineRange(c.start_line, c.line)}`)
+  for (const comment of comments) {
+    logger(
+      `- ${comment.path}:${formatLineRange(comment.start_line, comment.line)}`
+    )
   }
 }
 
@@ -466,8 +468,8 @@ async function filterSuggestionsInPullRequestDiff({
   }
 
   const rightSideAnchors = buildRightSideAnchors(parsedPullRequestDiff)
-  const { pass: valid, fail: skipped } = partition(comments, (c) =>
-    isValidSuggestion(c, rightSideAnchors)
+  const { pass: valid, fail: skipped } = partition(comments, (comment) =>
+    isValidSuggestion(comment, rightSideAnchors)
   )
   logCommentList(
     'Suggestions skipped because they are outside the pull request diff:',
