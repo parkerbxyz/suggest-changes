@@ -3,12 +3,12 @@
 This GitHub Action takes changes from the working directory (using `git diff`) and applies them as suggested changes in a pull request review. This can be useful after running a linter or formatter that automatically makes fixes for you.
 
 - Gives contributors an opportunity to review and accept automated changes.
-- Enables semi-automated changes to pull requests without the needing to use a personal access token (PAT) or [GitHub App installation token](https://github.com/actions/create-github-app-token) to trigger workflow runs.
-
-> [!NOTE]
-> This GitHub Action only works on [`pull_request`](https://docs.github.com/actions/using-workflows/events-that-trigger-workflows#pull_request) workflow events.
+- Enables semi-automated changes to pull requests without needing to use a personal access token (PAT) or [GitHub App installation token](https://github.com/actions/create-github-app-token) to trigger workflow runs.
 
 ## Usage
+
+> [!IMPORTANT]
+> This GitHub Action only works on [`pull_request`](https://docs.github.com/actions/using-workflows/events-that-trigger-workflows#pull_request) events.
 
 You can use this action in an existing workflow and have it run after a linter or formatter step. For example, if you have a workflow that runs [markdownlint](https://github.com/DavidAnson/markdownlint) on all Markdown files in a pull request, you can use this action to suggest changes to the pull request after markdownlint has run.
 
@@ -44,15 +44,12 @@ jobs:
           fail-if-changed: 'true'
 
       # Suggest fixes if any were made
-      - uses: parkerbxyz/suggest-changes@v2
+      - uses: parkerbxyz/suggest-changes@v3
         if: failure() && steps.verify-changed-files.outcome == 'failure'
         with:
           comment: 'Please commit the suggested changes from markdownlint.'
           event: 'REQUEST_CHANGES'
 ```
-
-> [!NOTE]
-> Suggested changes are limited to [3000 files per pull request](https://docs.github.com/rest/pulls/pulls?apiVersion=2022-11-28#list-pull-requests-files)
 
 Here is what an automated pull request review with suggested changes would look like using the workflow configuration above:
 
@@ -60,3 +57,10 @@ Here is what an automated pull request review with suggested changes would look 
   <source media="(prefers-color-scheme: dark)" srcset="https://github.com/parkerbxyz/suggest-changes/assets/17183625/7657671b-35ba-4609-8031-8dc88a6e75e8">
   <img alt="A screenshot showing an automated pull request review with suggested changes" src="https://github.com/parkerbxyz/suggest-changes/assets/17183625/b59e0b60-162f-47ef-8c18-4e5ea11fb175">
 </picture>
+
+## Limitations
+
+Limitations due to GitHub API and platform constraints:
+
+- Suggested changes can only be applied to [files](https://github.com/orgs/community/discussions/9099) and [lines](https://github.com/orgs/community/discussions/4452) that are part of the pull request diff.
+- Suggested changes are limited to [3000 files per pull request](https://docs.github.com/rest/pulls/pulls?apiVersion=2022-11-28#list-pull-requests-files).
