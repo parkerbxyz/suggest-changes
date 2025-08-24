@@ -60,7 +60,7 @@ Here is what an automated pull request review with suggested changes would look 
 
 ## Limitations
 
-This action has a few limitations due to GitHub API and platform constraints:
+Limitations due to GitHub API and platform constraints:
 
 - Suggested changes can only be applied to [files](https://github.com/orgs/community/discussions/9099) and [lines](https://github.com/orgs/community/discussions/4452) that are part of the pull request diff.
 - Suggested changes are limited to [3000 files per pull request](https://docs.github.com/rest/pulls/pulls?apiVersion=2022-11-28#list-pull-requests-files).
