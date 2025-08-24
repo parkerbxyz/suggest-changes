@@ -1,8 +1,9 @@
 // @ts-check
 
-import { debug, info, getInput, setFailed } from '@actions/core'
+import { debug, getInput, info, setFailed, warning } from '@actions/core'
 import { getExecOutput } from '@actions/exec'
 import { Octokit } from '@octokit/action'
+import { RequestError } from '@octokit/request-error'
 
 import { readFileSync } from 'node:fs'
 import { env } from 'node:process'
@@ -13,9 +14,10 @@ import parseGitDiff from 'parse-git-diff'
 /** @typedef {import('parse-git-diff').DeletedLine} DeletedLine */
 /** @typedef {import('parse-git-diff').UnchangedLine} UnchangedLine */
 /** @typedef {import('@octokit/types').Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/comments']['response']['data'][number]} GetReviewComment */
-/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} PostReviewComment */
+/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']>[number]} ReviewCommentInput */
+/** @typedef {ReviewCommentInput & { line: number }} ReviewCommentDraft */
+/** @typedef {NonNullable<import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']>} ReviewEvent */
 /** @typedef {import("@octokit/webhooks-types").PullRequestEvent} PullRequestEvent */
-/** @typedef {import('@octokit/types').Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']} ReviewEvent */
 
 /**
  * @typedef {Object} SuggestionBody
@@ -69,6 +71,7 @@ export async function getGitDiff(gitArgs) {
 }
 
 /**
+ * Create a suggestion fenced block.
  * @param {string} content
  * @returns {string}
  */
@@ -76,6 +79,42 @@ export const createSuggestion = (content) => {
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
   // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
   return `\`\`\`\`suggestion\n${content}\n\`\`\`\``
+}
+
+/**
+ * Format a line range for logging: "start-end" for multi-line, or the single line number.
+ * startLine is undefined for single-line suggestions; line is always defined.
+ * @param {number | undefined} startLine
+ * @param {number} line
+ * @returns {string}
+ */
+function formatLineRange(startLine, line) {
+  return typeof startLine === 'number' && startLine !== line
+    ? `${startLine}-${line}`
+    : String(line)
+}
+
+/**
+ * Returns true for the known 422 "line must be part of the diff" validation failure.
+ * Strictly requires an Octokit RequestError so unrelated errors are rethrown.
+ * @param {unknown} err
+ * @returns {err is RequestError}
+ */
+function isLineOutsideDiffError(err) {
+  return (
+    err instanceof RequestError &&
+    err.status === 422 &&
+    /line must be part of the diff/i.test(String(err.message))
+  )
+}
+
+/**
+ * Normalize unknown error-like values to a concise string message.
+ * @param {unknown} err
+ * @returns {string}
+ */
+function formatError(err) {
+  return err instanceof Error ? err.message : String(err)
 }
 
 /**
@@ -101,7 +140,6 @@ const filterChangesByType = (changes) => ({
  */
 export const groupChangesForSuggestions = (changes) => {
   if (changes.length === 0) return []
-
   // Group by line proximity using appropriate coordinate systems
   // - Deletions use lineBefore (original file line numbers)
   // - Additions use lineAfter (new file line numbers)
@@ -153,11 +191,10 @@ export const generateSuggestionBody = (changes) => {
   const { addedLines, deletedLines, unchangedLines } =
     filterChangesByType(changes)
 
-  // No additions means no content to suggest, except for pure deletions
+  // No additions means no content to suggest, except for pure deletions (empty replacement block)
   if (addedLines.length === 0) {
-    return deletedLines.length > 0
-      ? { body: createSuggestion(''), lineCount: deletedLines.length }
-      : null
+    if (deletedLines.length === 0) return null
+    return { body: createSuggestion(''), lineCount: deletedLines.length }
   }
 
   // Pure additions: include context if available
@@ -207,7 +244,7 @@ export const calculateLinePosition = (
 
 /**
  * Function to generate a unique key for a comment
- * @param {PostReviewComment | GetReviewComment} comment
+ * @param {ReviewCommentInput | GetReviewComment} comment
  * @returns {string}
  */
 export const generateCommentKey = (comment) =>
@@ -216,71 +253,228 @@ export const generateCommentKey = (comment) =>
   }`
 
 /**
+ * Lazily iterate over all suggestion groups in a parsed diff.
+ * Yields objects containing path, fromFileRange, and group changes.
+ * @param {ReturnType<typeof parseGitDiff>} parsedDiff
+ */
+function* iterateSuggestionGroups(parsedDiff) {
+  for (const file of parsedDiff.files) {
+    if (file.type !== 'ChangedFile') continue
+    const path = file.path
+    for (const chunk of file.chunks) {
+      if (chunk.type !== 'Chunk') continue
+      const { fromFileRange, changes } = chunk
+      const groups = groupChangesForSuggestions(changes)
+      for (const group of groups) {
+        yield { path, fromFileRange, group }
+      }
+    }
+  }
+}
+
+/**
+ * Build a review comment draft from a suggestion group.
+ * Returns null if the group does not produce a valid suggestion body.
+ * @param {string} path
+ * @param {{start: number}} fromFileRange
+ * @param {AnyLineChange[]} group
+ * @returns {ReviewCommentDraft | null}
+ */
+function buildCommentDraft(path, fromFileRange, group) {
+  const suggestion = generateSuggestionBody(group)
+  if (!suggestion) return null
+  const { body, lineCount } = suggestion
+  const { startLine, endLine } = calculateLinePosition(
+    group,
+    lineCount,
+    fromFileRange
+  )
+  return /** @type {ReviewCommentDraft} */ ({
+    path,
+    body,
+    line: endLine,
+    ...(lineCount > 1 && {
+      start_line: startLine,
+      start_side: 'RIGHT',
+    }),
+  })
+}
+
+/**
+ * Partition an iterable into two arrays based on a predicate.
+ * @template T
+ * @param {Iterable<T>} items
+ * @param {(item: T) => boolean} predicate
+ * @returns {{pass: T[], fail: T[]}}
+ */
+function partition(items, predicate) {
+  /** @type {T[]} */ const pass = []
+  /** @type {T[]} */ const fail = []
+  for (const item of items) {
+    ;(predicate(item) ? pass : fail).push(item)
+  }
+  return { pass, fail }
+}
+
+/**
  * Generate GitHub review comments from a parsed diff (exported for testing)
  * @param {ReturnType<typeof parseGitDiff>} parsedDiff - Parsed diff from parse-git-diff
  * @param {Set<string>} existingCommentKeys - Set of existing comment keys to avoid duplicates
- * @returns {Array<{path: string, body: string, line: number, start_line?: number, start_side?: string}>} Generated comments
+ * @returns {Array<ReviewCommentDraft>} Generated comments
  */
 export function generateReviewComments(
   parsedDiff,
   existingCommentKeys = new Set()
 ) {
-  return parsedDiff.files
-    .filter((file) => file.type === 'ChangedFile')
-    .flatMap(({ path, chunks }) =>
-      chunks
-        .filter((chunk) => chunk.type === 'Chunk')
-        .flatMap(({ fromFileRange, changes }) =>
-          processChunkChanges(path, fromFileRange, changes, existingCommentKeys)
-        )
+  const drafts = []
+  for (const { path, fromFileRange, group } of iterateSuggestionGroups(
+    parsedDiff
+  )) {
+    const draft = buildCommentDraft(path, fromFileRange, group)
+    if (draft) drafts.push(draft)
+  }
+  const { pass: unique, fail: skipped } = partition(
+    drafts,
+    (draft) => !existingCommentKeys.has(generateCommentKey(draft))
+  )
+  if (skipped.length) {
+    logCommentList(
+      'Suggestions skipped because they would duplicate existing suggestions:',
+      skipped
     )
+  }
+  return unique
 }
 
 /**
- * Process changes within a chunk to generate review comments
- * @param {string} path - File path
- * @param {{start: number}} fromFileRange - File range information
- * @param {AnyLineChange[]} changes - Changes in the chunk
- * @param {Set<string>} existingCommentKeys - Set of existing comment keys
- * @returns {Array<{path: string, body: string, line: number, start_line?: number, start_side?: string}>} Generated comments
+ * Fetch the canonical PR diff as a string or return null on failure/unavailability.
+ * @param {Octokit} octokit
+ * @param {string} owner
+ * @param {string} repo
+ * @param {number} pull_number
+ * @returns {Promise<string | null>}
  */
-const processChunkChanges = (
-  path,
-  fromFileRange,
-  changes,
-  existingCommentKeys
-) => {
-  const suggestionGroups = groupChangesForSuggestions(changes)
+async function fetchCanonicalDiff(octokit, owner, repo, pull_number) {
+  if (
+    !octokit.pulls ||
+    typeof (/** @type {any} */ octokit.pulls.get) !== 'function'
+  ) {
+    debug('PR diff filter: pulls.get unavailable; skipping.')
+    return null
+  }
+  try {
+    const { data } = await /** @type {any} */ (octokit).pulls.get({
+      owner,
+      repo,
+      pull_number,
+      headers: { accept: 'application/vnd.github.v3.diff' },
+    })
+    if (typeof data !== 'string' || !/^diff --git /.test(data)) {
+      debug('PR diff filter: no usable diff string; skipping.')
+      return null
+    }
+    return data
+  } catch (err) {
+    debug(`PR diff fetch failed: ${formatError(err)}`)
+    return null
+  }
+}
 
-  return suggestionGroups.flatMap((groupChanges) => {
-    const suggestionBody = generateSuggestionBody(groupChanges)
+/**
+ * Build a lookup of valid right-side line numbers per file path.
+ * @param {ReturnType<typeof parseGitDiff>} parsedDiff
+ * @returns {Record<string, Set<number>>}
+ */
+function buildRightSideAnchors(parsedDiff) {
+  return Object.fromEntries(
+    parsedDiff.files
+      .filter((file) => file.type === 'ChangedFile')
+      .map((file) => [
+        file.path,
+        new Set(
+          file.chunks
+            .filter((chunk) => chunk.type === 'Chunk')
+            .flatMap((chunk) =>
+              chunk.changes
+                .filter(
+                  (change) => isAddedLine(change) || isUnchangedLine(change)
+                )
+                .map((change) => change.lineAfter)
+            )
+        ),
+      ])
+  )
+}
 
-    // Skip if no suggestion was generated
-    if (!suggestionBody) return []
+/**
+ * Determine if a review comment draft is valid within the PR diff.
+ * @param {ReviewCommentDraft} comment
+ * @param {Record<string, Set<number>>} anchors
+ */
+function isValidSuggestion(comment, anchors) {
+  const validLines = anchors[comment.path]
+  if (!validLines) return false
+  if (!validLines.has(comment.line)) return false
+  if (comment.start_line !== undefined && !validLines.has(comment.start_line))
+    return false
+  return true
+}
 
-    const { body, lineCount } = suggestionBody
-    const { startLine, endLine } = calculateLinePosition(
-      groupChanges,
-      lineCount,
-      fromFileRange
+/**
+ * Log a list of review comment drafts with a standardized header.
+ * @param {string} header
+ * @param {ReviewCommentDraft[]} comments
+ * @param {(message: string) => void} [logger]
+ */
+function logCommentList(header, comments, logger = info) {
+  if (!comments.length) return
+  logger(`${header} ${comments.length}`)
+  for (const comment of comments) {
+    logger(
+      `- ${comment.path}:${formatLineRange(comment.start_line, comment.line)}`
     )
+  }
+}
 
-    // Create comment with conditional multi-line properties
-    const comment = {
-      path,
-      body,
-      line: endLine,
-      ...(lineCount > 1 && { start_line: startLine, start_side: 'RIGHT' }),
-    }
+/**
+ * Filters suggestion comments using the canonical server-side PR diff.
+ * Returns a new array containing only valid suggestions and logs summary info.
+ * Gracefully falls back (returns original comments) if the diff cannot be fetched/parsed.
+ * @param {Object} params
+ * @param {Octokit} params.octokit
+ * @param {string} params.owner
+ * @param {string} params.repo
+ * @param {number} params.pull_number
+ * @param {Array<ReviewCommentDraft>} params.comments
+ * @returns {Promise<Array<ReviewCommentDraft>>}
+ */
+async function filterSuggestionsInPullRequestDiff({
+  octokit,
+  owner,
+  repo,
+  pull_number,
+  comments,
+}) {
+  const diffString = await fetchCanonicalDiff(octokit, owner, repo, pull_number)
+  if (!diffString) return comments
 
-    // Skip if comment already exists
-    const commentKey = generateCommentKey(comment)
-    if (existingCommentKeys.has(commentKey)) {
-      info(`Skipping suggestion for ${comment.path}:${comment.start_line ? `${comment.start_line}-${comment.line}` : comment.line} to avoid duplicating existing review comment`)
-      return []
-    }
-    return [comment]
-  })
+  let parsedPullRequestDiff
+  try {
+    parsedPullRequestDiff = parseGitDiff(diffString)
+  } catch (err) {
+    warning(`PR diff parse failed: ${formatError(err)}`)
+    return comments
+  }
+
+  const rightSideAnchors = buildRightSideAnchors(parsedPullRequestDiff)
+  const { pass: valid, fail: skipped } = partition(comments, (comment) =>
+    isValidSuggestion(comment, rightSideAnchors)
+  )
+  logCommentList(
+    'Suggestions skipped because they are outside the pull request diff:',
+    skipped
+  )
+  return valid
 }
 
 /**
@@ -308,18 +502,30 @@ export async function run({
 }) {
   debug(`Diff output: ${diff}`)
 
-  const parsedDiff = parseGitDiff(diff)
-
   const existingComments = (
     await octokit.pulls.listReviewComments({ owner, repo, pull_number })
   ).data
-
   const existingCommentKeys = new Set(existingComments.map(generateCommentKey))
 
-  const comments = generateReviewComments(parsedDiff, existingCommentKeys)
+  // Parse diff after collecting existing comment keys
+  const parsedDiff = parseGitDiff(diff)
 
-  // Create a review with the suggested changes if there are any
-  if (comments.length > 0) {
+  const initialComments = generateReviewComments(
+    parsedDiff,
+    existingCommentKeys
+  )
+  const comments = await filterSuggestionsInPullRequestDiff({
+    octokit,
+    owner,
+    repo,
+    pull_number,
+    comments: initialComments,
+  })
+  logCommentList(`Suggestions to be included in review:`, comments)
+  if (!comments.length) {
+    return { comments: [], reviewCreated: false }
+  }
+  try {
     await octokit.pulls.createReview({
       owner,
       repo,
@@ -329,12 +535,20 @@ export async function run({
       event,
       comments,
     })
+    debug('Batch create succeeded.')
+    return { comments, reviewCreated: true }
+  } catch (err) {
+    if (isLineOutsideDiffError(err)) {
+      debug(
+        'Batch review creation failed (422: line must be part of the diff). Returning without review.'
+      )
+      return { comments: [], reviewCreated: false }
+    }
+    throw err
   }
-
-  return { comments, reviewCreated: comments.length > 0 }
 }
 
-// Only run main logic when this file is executed directly (not when imported)
+// Main entrypoint (only when executed directly)
 async function main() {
   const octokit = new Octokit({
     userAgent: 'suggest-changes',
@@ -349,7 +563,7 @@ async function main() {
 
   if (!eventPayload?.pull_request) {
     const eventName = String(env.GITHUB_EVENT_NAME)
-      throw new Error(
+    throw new Error(
       [
         `This workflow was triggered via ${eventName}.`,
         `The ${eventName} event payload does not include the pull_request data required by this action.`,
@@ -371,16 +585,7 @@ async function main() {
   const event = /** @type {ReviewEvent} */ (getInput('event').toUpperCase())
   const body = getInput('comment')
 
-  await run({
-    octokit,
-    owner,
-    repo,
-    pull_number,
-    commit_id,
-    diff,
-    event,
-    body,
-  })
+  await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body })
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

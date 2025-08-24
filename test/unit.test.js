@@ -1,4 +1,5 @@
 // @ts-check
+import { RequestError } from '@octokit/request-error'
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import parseGitDiff from 'parse-git-diff'
@@ -6,7 +7,7 @@ import {
   createSuggestion,
   generateCommentKey,
   generateReviewComments,
-  run
+  run,
 } from '../index.js'
 
 describe('Unit Tests', () => {
@@ -16,20 +17,24 @@ describe('Unit Tests', () => {
         path: 'file.md',
         line: 5,
         start_line: 3,
-        body: 'Fix this'
+        body: 'Fix this',
       }
 
       const comment2 = {
         path: 'file.md',
         line: 5,
         start_line: 3,
-        body: 'Fix that'
+        body: 'Fix that',
       }
 
       const key1 = generateCommentKey(comment1)
       const key2 = generateCommentKey(comment2)
 
-      assert.notStrictEqual(key1, key2, 'Different comments should have different keys')
+      assert.notStrictEqual(
+        key1,
+        key2,
+        'Different comments should have different keys'
+      )
       assert.strictEqual(key1, 'file.md:5:3:Fix this')
       assert.strictEqual(key2, 'file.md:5:3:Fix that')
     })
@@ -37,7 +42,7 @@ describe('Unit Tests', () => {
     test('should handle missing optional fields', () => {
       const comment = {
         path: 'file.md',
-        body: 'Simple comment'
+        body: 'Simple comment',
       }
 
       const key = generateCommentKey(comment)
@@ -49,20 +54,24 @@ describe('Unit Tests', () => {
         path: 'test.md',
         line: 2,
         start_line: 1,
-        body: '````suggestion\n### Level 3 heading\nThis is a sentence.\n````'
+        body: '````suggestion\n### Level 3 heading\nThis is a sentence.\n````',
       }
 
       const comment2 = {
         path: 'test.md',
         line: 2,
         start_line: 1,
-        body: '````suggestion\n### Level 3 heading\nThis is a sentence.\n````'
+        body: '````suggestion\n### Level 3 heading\nThis is a sentence.\n````',
       }
 
       const key1 = generateCommentKey(comment1)
       const key2 = generateCommentKey(comment2)
 
-      assert.strictEqual(key1, key2, 'Identical comments should have the same key')
+      assert.strictEqual(
+        key1,
+        key2,
+        'Identical comments should have the same key'
+      )
     })
   })
 
@@ -84,7 +93,10 @@ describe('Unit Tests', () => {
 
     test('should preserve whitespace and formatting', () => {
       const result = createSuggestion('  Indented line  \n\nWith empty line')
-      assert.strictEqual(result, '````suggestion\n  Indented line  \n\nWith empty line\n````')
+      assert.strictEqual(
+        result,
+        '````suggestion\n  Indented line  \n\nWith empty line\n````'
+      )
     })
   })
 
@@ -92,8 +104,8 @@ describe('Unit Tests', () => {
     test('should return no comments for empty diff', async () => {
       const mockOctokit = {
         pulls: {
-          listReviewComments: async () => ({ data: [] })
-        }
+          listReviewComments: async () => ({ data: [] }),
+        },
       }
 
       const result = await run({
@@ -105,12 +117,12 @@ describe('Unit Tests', () => {
         commit_id: 'abc123',
         diff: '',
         event: 'COMMENT',
-        body: 'Test review'
+        body: 'Test review',
       })
 
       assert.deepStrictEqual(result, {
         comments: [],
-        reviewCreated: false
+        reviewCreated: false,
       })
     })
 
@@ -125,10 +137,9 @@ describe('Unit Tests', () => {
       const mockOctokit = {
         pulls: {
           listReviewComments: async () => ({ data: [] }),
-          createReview: async () => ({ data: { id: 123 } })
-        }
+          createReview: async () => ({ data: { id: 123 } }),
+        },
       }
-
 
       const result = await run({
         // @ts-ignore - Test mock doesn't need full Octokit interface
@@ -139,11 +150,58 @@ describe('Unit Tests', () => {
         commit_id: 'abc123',
         diff,
         event: 'COMMENT',
-        body: 'Test review'
+        body: 'Test review',
       })
 
       assert.strictEqual(result.reviewCreated, true)
       assert.strictEqual(result.comments.length, 1)
+    })
+
+    test('should return reviewCreated=false on 422 line outside diff error', async () => {
+      const diff = `diff --git a/test.md b/test.md
+--- a/test.md
++++ b/test.md
+@@ -1,1 +1,1 @@
+-old line
++new line`
+
+      const mockOctokit = {
+        pulls: {
+          listReviewComments: async () => ({ data: [] }),
+          createReview: async () => {
+            throw new RequestError('line must be part of the diff', 422, {
+              request: {
+                method: 'POST',
+                url: 'https://api.github.com/repos/test/test/pulls/1/reviews',
+                headers: {},
+              },
+            })
+          },
+        },
+      }
+
+      const result = await run({
+        // @ts-ignore - mock
+        octokit: mockOctokit,
+        owner: 'test-owner',
+        repo: 'test-repo',
+        pull_number: 1,
+        commit_id: 'abc123',
+        diff,
+        event: 'COMMENT',
+        body: 'Test review',
+      })
+
+      assert.strictEqual(
+        result.reviewCreated,
+        false,
+        'Expected reviewCreated to be false'
+      )
+      assert.strictEqual(
+        result.comments.length,
+        0,
+        'Expected comments array to be emptied on 422 handling'
+      )
     })
   })
 
@@ -160,16 +218,32 @@ describe('Unit Tests', () => {
 
       // First call should generate a comment
       const firstResult = generateReviewComments(parsedDiff, new Set())
-      assert.strictEqual(firstResult.length, 1, 'Should generate one comment on first call')
+      assert.strictEqual(
+        firstResult.length,
+        1,
+        'Should generate one comment on first call'
+      )
 
       // Create existing comment keys based on the first result
-      const existingCommentKeys = new Set(firstResult.map(comment => 
-        `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${comment.body}`
-      ))
+      const existingCommentKeys = new Set(
+        firstResult.map(
+          (comment) =>
+            `${comment.path}:${comment.line ?? ''}:${
+              comment.start_line ?? ''
+            }:${comment.body}`
+        )
+      )
 
       // Second call with same diff should skip duplicate and return no comments
-      const secondResult = generateReviewComments(parsedDiff, existingCommentKeys)
-      assert.strictEqual(secondResult.length, 0, 'Should skip duplicate comment on second call')
+      const secondResult = generateReviewComments(
+        parsedDiff,
+        existingCommentKeys
+      )
+      assert.strictEqual(
+        secondResult.length,
+        0,
+        'Should skip duplicate comment on second call'
+      )
     })
   })
 })
