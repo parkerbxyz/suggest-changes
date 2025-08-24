@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.7](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.6...v2.0.7) (2025-08-24)
+
+
+### Bug Fixes
+
+* add error handling for missing `pull_request` data ([#96](https://github.com/parkerbxyz/suggest-changes/issues/96)) ([fbde3ad](https://github.com/parkerbxyz/suggest-changes/commit/fbde3ad9521f88f98dd6601a305e05a662412247))
+* add info logging when duplicate suggestions are skipped ([#100](https://github.com/parkerbxyz/suggest-changes/issues/100)) ([5509aa9](https://github.com/parkerbxyz/suggest-changes/commit/5509aa9b588d8a9cd0fa023210c78d9cf37f1a6a))
+* only comment on lines that are part of the pull request diff  ([#102](https://github.com/parkerbxyz/suggest-changes/issues/102)) ([d2f3ca3](https://github.com/parkerbxyz/suggest-changes/commit/d2f3ca31031d0c8b398885a81082c8bacd5cccca))
+
+## [2.0.6](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.5...v2.0.6) (2025-08-17)
+
+
+### Bug Fixes
+
+* adjust diff handling when codestyle checkers expand lines ([#87](https://github.com/parkerbxyz/suggest-changes/issues/87)) ([68e7b97](https://github.com/parkerbxyz/suggest-changes/commit/68e7b9788007ff0ba17be78dd735a97e9fb5f64b))
+
 ## [2.0.5](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.4...v2.0.5) (2025-07-29)
 
 
