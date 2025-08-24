@@ -59431,6 +59431,18 @@ function logCommentList(header, comments, logger = core.info) {
   }
 }
 
+/**
+ * Filters suggestion comments using the canonical server-side PR diff.
+ * Returns a new array containing only valid suggestions and logs summary info.
+ * Gracefully falls back (returns original comments) if the diff cannot be fetched/parsed.
+ * @param {Object} params
+ * @param {Octokit} params.octokit
+ * @param {string} params.owner
+ * @param {string} params.repo
+ * @param {number} params.pull_number
+ * @param {Array<ReviewCommentDraft>} params.comments
+ * @returns {Promise<Array<ReviewCommentDraft>>}
+ */
 async function filterSuggestionsInPullRequestDiff({
   octokit,
   owner,
@@ -59438,18 +59450,6 @@ async function filterSuggestionsInPullRequestDiff({
   pull_number,
   comments,
 }) {
-  /**
-   * Filters suggestion comments using the canonical server-side PR diff.
-   * Returns a new array containing only valid suggestions and logs summary info.
-   * Gracefully falls back (returns original comments) if the diff cannot be fetched/parsed.
-   * @param {Object} params
-   * @param {Octokit} params.octokit
-   * @param {string} params.owner
-   * @param {string} params.repo
-   * @param {number} params.pull_number
-   * @param {Array<ReviewCommentDraft>} params.comments
-   * @returns {Promise<Array<ReviewCommentDraft>>}
-   */
   const diffString = await fetchCanonicalDiff(octokit, owner, repo, pull_number)
   if (!diffString) return comments
 
