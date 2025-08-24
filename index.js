@@ -339,7 +339,7 @@ export function generateReviewComments(
   )
   if (skipped.length) {
     logCommentList(
-      'Skipped duplicate suggestions (already reviewed):',
+      'Suggestions skipped because they would duplicate existing suggestions:',
       skipped,
       info
     )
@@ -470,7 +470,7 @@ async function filterSuggestionsInPullRequestDiff({
     isValidSuggestion(c, rightSideAnchors)
   )
   logCommentList(
-    'Suggestions skipped because they are outside the PR diff:',
+    'Suggestions skipped because they are outside the pull request diff:',
     skipped,
     info
   )
