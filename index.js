@@ -340,8 +340,7 @@ export function generateReviewComments(
   if (skipped.length) {
     logCommentList(
       'Suggestions skipped because they would duplicate existing suggestions:',
-      skipped,
-      info
+      skipped
     )
   }
   return unique
@@ -473,8 +472,7 @@ async function filterSuggestionsInPullRequestDiff({
   )
   logCommentList(
     'Suggestions skipped because they are outside the pull request diff:',
-    skipped,
-    info
+    skipped
   )
   return valid
 }
@@ -523,11 +521,7 @@ export async function run({
     pull_number,
     comments: initialComments,
   })
-  logCommentList(
-    `Creating review with ${comments.length} suggestions:`,
-    comments,
-    info
-  )
+  logCommentList(`Suggestions to be included in review:`, comments)
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
