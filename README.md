@@ -3,7 +3,7 @@
 This GitHub Action takes changes from the working directory (using `git diff`) and applies them as suggested changes in a pull request review. This can be useful after running a linter or formatter that automatically makes fixes for you.
 
 - Gives contributors an opportunity to review and accept automated changes.
-- Enables semi-automated changes to pull requests without the needing to use a personal access token (PAT) or [GitHub App installation token](https://github.com/actions/create-github-app-token) to trigger workflow runs.
+- Enables semi-automated changes to pull requests without needing to use a personal access token (PAT) or [GitHub App installation token](https://github.com/actions/create-github-app-token) to trigger workflow runs.
 
 ## Usage
 
@@ -60,8 +60,7 @@ Here is what an automated pull request review with suggested changes would look 
 
 ## Limitations
 
-Due to GitHub API and platform constraints, this action has a few limitations:
+This action has a few limitations due to GitHub API and platform constraints:
 
-- Suggested changes can only be applied to [files that are part of the pull request diff](https://github.com/orgs/community/discussions/9099).
-- Suggested changes can only be applied to [lines that are part of the pull request diff](https://github.com/orgs/community/discussions/4452).
+- Suggested changes can only be applied to [files](https://github.com/orgs/community/discussions/9099) and [lines](https://github.com/orgs/community/discussions/4452) that are part of the pull request diff.
 - Suggested changes are limited to [3000 files per pull request](https://docs.github.com/rest/pulls/pulls?apiVersion=2022-11-28#list-pull-requests-files).
