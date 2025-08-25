@@ -517,8 +517,8 @@ export async function run({
   if (initialComments.length) {
     debug(`Generated suggestions: ${initialComments.length}`)
     for (const comment of initialComments) {
-      const lineRange = comment.start_line 
-        ? `${comment.start_line}-${comment.line}` 
+      const lineRange = comment.start_line
+        ? `${comment.start_line}-${comment.line}`
         : `${comment.line}`
       debug(`- ${comment.path}:${lineRange}`)
       debug(`  ${comment.body}`)
