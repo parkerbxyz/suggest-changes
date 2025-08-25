@@ -11,11 +11,11 @@ Bootstrap, build, and test the repository:
 - Install dependencies: `npm ci` -- takes 1 second. NEVER CANCEL. Set timeout to 30+ seconds.
 - Build: `npm run build` -- takes 2-3 seconds. NEVER CANCEL. Set timeout to 30+ seconds.
 - Run unit tests: `npm test` -- takes 0.4 seconds. NEVER CANCEL. Set timeout to 30+ seconds.
-- Format code: `npx prettier --write --yes .` -- takes 4-5 seconds. Set timeout to 30+ seconds.
+- Format code: `npx --yes prettier --write .` -- takes 4-5 seconds. Set timeout to 30+ seconds.
 
 ## System Requirements
 
-- Node.js 20.9.0+ (specified in `.node-version` and `package.json` engines)
+- Node.js (version specified in `package.json` engines)
 - npm (comes with Node.js)
 
 ## Build and Test Commands
@@ -33,8 +33,8 @@ Bootstrap, build, and test the repository:
 
 **Code Quality:**
 
-- `npx prettier --check --yes .` - Check code formatting
-- `npx prettier --write --yes .` - Fix code formatting automatically
+- `npx --yes prettier --check .` - Check code formatting
+- `npx --yes prettier --write .` - Fix code formatting automatically
 - Note: `dist/index.js` is generated and may have formatting differences - this is expected
 
 ## Validation
@@ -92,8 +92,8 @@ Bootstrap, build, and test the repository:
 
 **Code Style:**
 
-- Uses Prettier with specific configuration (no semicolons, single quotes)
-- Always run `npx prettier --write .` before committing
+- Uses Prettier
+- Always run `npx --yes prettier --write .` before committing
 - Build creates bundled `dist/index.js` that must be committed
 
 ## Common Tasks Reference
@@ -102,7 +102,6 @@ Bootstrap, build, and test the repository:
 
 ```
 .github/          - GitHub workflows and configurations
-.node-version     - Node.js version specification (20.9.0)
 action.yml        - GitHub Action metadata
 dist/            - Bundled action code (generated)
 index.js         - Main action source code
@@ -114,7 +113,7 @@ test/            - Test files and fixtures
 The action is designed to run after linters like markdownlint:
 
 ```yaml
-- uses: parkerbxyz/suggest-changes@v2
+- uses: parkerbxyz/suggest-changes@v3
   with:
     comment: 'Please commit the suggested changes.'
     event: 'REQUEST_CHANGES'
@@ -127,29 +126,4 @@ test/fixtures/markdownlint/
 ├── before.md    - File with formatting issues
 ├── after.md     - Corrected version
 └── README.md    - Documentation of test cases
-```
-
-**Example npm scripts reference:**
-
-```json
-{
-  "scripts": {
-    "build": "ncc build",
-    "test": "node --test",
-    "test:coverage": "node --test --experimental-test-coverage",
-    "test:watch": "node --test --watch"
-  }
-}
-```
-
-**Package.json key configurations:**
-
-```json
-{
-  "engines": { "node": ">=20.9.0" },
-  "prettier": {
-    "semi": false,
-    "singleQuote": true
-  }
-}
 ```
