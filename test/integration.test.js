@@ -65,7 +65,7 @@ describe('Integration Tests', () => {
         findBeforeAfterPairs(join(fixtureDir, toolDir)).map((pair) => ({
           toolDir,
           ...pair,
-        }))
+        })),
       )
       .forEach(({ toolDir, beforeFile, afterFile, testName }) => {
         test(`${toolDir}/${testName} suggestions should match snapshot`, async (t) => {
