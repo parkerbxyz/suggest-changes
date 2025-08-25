@@ -40,7 +40,7 @@ Another paragraph after too many blank lines.
 ```javascript
 // Code block example
 function example() {
-  return 'test'
+  return "test";
 }
 ```
 
