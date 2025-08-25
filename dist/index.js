@@ -59509,6 +59509,24 @@ async function run({
     parsedDiff,
     existingCommentKeys
   )
+  if (initialComments.length) {
+    (0,core.debug)(`Generated suggestions: ${initialComments.length}`)
+    for (const comment of initialComments) {
+      ;(0,core.debug)(`- Draft review comment:`)
+      ;(0,core.debug)(`  path: ${comment.path}`)
+      ;(0,core.debug)(`  line: ${comment.line}`)
+      if (comment.start_line !== undefined) {
+        (0,core.debug)(`  start_line: ${comment.start_line}`)
+      }
+      if (comment.start_side !== undefined) {
+        (0,core.debug)(`  start_side: ${comment.start_side}`)
+      }
+      (0,core.debug)(`  body:`)
+      ;(0,core.debug)(`${comment.body}`)
+    }
+  } else {
+    (0,core.debug)('Generated suggestions: 0')
+  }
   const comments = await filterSuggestionsInPullRequestDiff({
     octokit,
     owner,

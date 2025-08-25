@@ -526,7 +526,8 @@ export async function run({
       if (comment.start_side !== undefined) {
         debug(`  start_side: ${comment.start_side}`)
       }
-      debug(`  body: ${comment.body}`)
+      debug(`  body:`)
+      debug(`${comment.body}`)
     }
   } else {
     debug('Generated suggestions: 0')
