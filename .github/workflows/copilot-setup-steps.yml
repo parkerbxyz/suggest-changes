@@ -1,0 +1,38 @@
+name: Copilot Setup Steps
+
+# Automatically run the setup steps when they are changed to allow for easy validation,
+# and allow manual testing through the repository's "Actions" tab
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+# Configuration for Copilot Coding Agent
+# https://gh.io/copilot/actions-setup-steps
+jobs:
+  # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+
+    # Set the permissions to the lowest permissions possible needed for your steps.
+    # Copilot will be given its own token for its operations.
+    permissions:
+      contents: read # for checkout
+
+    # You can define any steps you want, and they will run before the agent starts.
+    # If you do not check out your code, Copilot will do this for you.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: 'package.json'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install
