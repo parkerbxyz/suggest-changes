@@ -514,6 +514,18 @@ export async function run({
     parsedDiff,
     existingCommentKeys
   )
+  if (initialComments.length) {
+    debug(`Generated suggestions: ${initialComments.length}`)
+    for (const comment of initialComments) {
+      const lineRange = comment.start_line 
+        ? `${comment.start_line}-${comment.line}` 
+        : `${comment.line}`
+      debug(`- ${comment.path}:${lineRange}`)
+      debug(`  ${comment.body}`)
+    }
+  } else {
+    debug('Generated suggestions: 0')
+  }
   const comments = await filterSuggestionsInPullRequestDiff({
     octokit,
     owner,
