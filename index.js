@@ -517,11 +517,16 @@ export async function run({
   if (initialComments.length) {
     debug(`Generated suggestions: ${initialComments.length}`)
     for (const comment of initialComments) {
-      const lineRange = comment.start_line
-        ? `${comment.start_line}-${comment.line}`
-        : `${comment.line}`
-      debug(`- ${comment.path}:${lineRange}`)
-      debug(`  ${comment.body}`)
+      debug(`- Draft review comment:`)
+      debug(`  path: ${comment.path}`)
+      debug(`  line: ${comment.line}`)
+      if (comment.start_line !== undefined) {
+        debug(`  start_line: ${comment.start_line}`)
+      }
+      if (comment.start_side !== undefined) {
+        debug(`  start_side: ${comment.start_side}`)
+      }
+      debug(`  body: ${comment.body}`)
     }
   } else {
     debug('Generated suggestions: 0')
