@@ -10,8 +10,8 @@ Bootstrap, build, and test the repository:
 
 - Install dependencies: `npm ci` -- takes 1 second. NEVER CANCEL. Set timeout to 30+ seconds.
 - Build: `npm run build` -- takes 2-3 seconds. NEVER CANCEL. Set timeout to 30+ seconds.
-- Run unit tests: `npm test -- test/unit.test.js` -- takes 0.4 seconds. NEVER CANCEL. Set timeout to 30+ seconds.
-- Format code: `npx prettier --write .` -- takes 4-5 seconds. Set timeout to 30+ seconds.
+- Run unit tests: `npm test` -- takes 0.4 seconds. NEVER CANCEL. Set timeout to 30+ seconds.
+- Format code: `npx prettier --write --yes .` -- takes 4-5 seconds. Set timeout to 30+ seconds.
 
 ## System Requirements
 
@@ -33,15 +33,15 @@ Bootstrap, build, and test the repository:
 
 **Code Quality:**
 
-- `npx prettier --check .` - Check code formatting  
-- `npx prettier --write .` - Fix code formatting automatically
+- `npx prettier --check --yes .` - Check code formatting
+- `npx prettier --write --yes .` - Fix code formatting automatically
 - Note: `dist/index.js` is generated and may have formatting differences - this is expected
 
 ## Validation
 
 **Always run these validation steps after making changes:**
 
-1. Check code formatting: `npx prettier --check .` (ignore `dist/index.js` formatting issues)
+1. Check code formatting: `npx prettier --check .`
 2. Fix formatting if needed: `npx prettier --write .`
 3. Build the action: `npm run build`
 4. Run unit tests: `npm test -- test/unit.test.js`
