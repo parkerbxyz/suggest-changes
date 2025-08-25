@@ -59522,7 +59522,8 @@ async function run({
         (0,core.debug)(`  start_side: ${comment.start_side}`)
       }
       (0,core.debug)(`  body:`)
-      ;(0,core.debug)(`${comment.body}`)
+      const indentedBody = comment.body.split('\n').map(line => `  ${line}`).join('\n')
+      ;(0,core.debug)(indentedBody)
     }
   } else {
     (0,core.debug)('Generated suggestions: 0')
