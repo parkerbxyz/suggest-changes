@@ -23,7 +23,7 @@ permissions:
 
 #### `pull_request` event
 
-The `pull_request` event is recommended for most use cases. However, when triggered from a fork, the default `GITHUB_TOKEN` has read-only permissions and cannot create review comments.
+The `pull_request` event is recommended for most use cases. However, when triggered from a fork, the default `GITHUB_TOKEN` has read-only permissions and lacks the necessary write permissions to create pull request review comments.
 
 For pull requests from forks, you have two options:
 
@@ -64,7 +64,7 @@ jobs:
           token: ${{ steps.generate-token.outputs.token }}
 ```
 
-This approach is more secure than `pull_request_target` because the workflow runs in the context of the fork, reducing the risk of exposing secrets or running malicious code.
+This approach is more secure than `pull_request_target` because the workflow runs in the context of the fork. This prevents untrusted code from accessing secrets from the base repository and limits the potential impact of security issues.
 
 ### Example
 
