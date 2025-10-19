@@ -15,7 +15,7 @@
     "@actions/core": "^1.11.1",
     "@actions/exec": "^1.1.1",
     "@octokit/action": "^8.0.2",
-    "@octokit/request-error": "^7.0.0",
+    "@octokit/request-error": "^7.0.1",
     "parse-git-diff": "^0.0.19"
   },
   "devDependencies": {
