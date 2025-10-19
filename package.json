@@ -1,9 +1,9 @@
 {
+  "name": "suggest-changes",
+  "version": "3.0.0",
   "description": "A GitHub Action for turning working directory changes into pull request review suggestions",
+  "license": "MIT",
   "type": "module",
-  "engines": {
-    "node": ">=24.5.0"
-  },
   "scripts": {
     "build": "ncc build",
     "test": "node --test",
@@ -23,6 +23,10 @@
     "@types/node": "^24.8.1",
     "@vercel/ncc": "^0.38.4"
   },
+  "engines": {
+    "node": ">=24.5.0"
+  },
+  "packageManager": "npm@11.6.0",
   "prettier": {
     "semi": false,
     "singleQuote": true
@@ -31,6 +35,5 @@
     "branches": [
       "main"
     ]
-  },
-  "version": "3.0.0"
+  }
 }
