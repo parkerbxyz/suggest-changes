@@ -1,6 +1,8 @@
 {
+  "name": "suggest-changes",
   "version": "3.0.0",
   "description": "A GitHub Action for turning working directory changes into pull request review suggestions",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "ncc build",
