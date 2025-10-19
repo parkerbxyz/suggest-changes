@@ -59195,13 +59195,17 @@ const generateSuggestionBody = (changes) => {
   // Pure additions: include context if available
   if (deletedLines.length === 0) {
     const hasContext = unchangedLines.length > 0
-    const suggestionLines = hasContext
+    // Check if context line comes before or after the added lines
+    const contextLineComesFirst = hasContext &&
+      unchangedLines[0].lineAfter < addedLines[0].lineAfter
+    
+    const suggestionLines = hasContext && contextLineComesFirst
       ? [unchangedLines[0].content, ...addedLines.map((line) => line.content)]
       : addedLines.map((line) => line.content)
 
     return {
       body: createSuggestion(suggestionLines.join('\n')),
-      lineCount: hasContext ? 1 : addedLines.length,
+      lineCount: hasContext && contextLineComesFirst ? 1 : addedLines.length,
     }
   }
 
@@ -59225,14 +59229,34 @@ const calculateLinePosition = (
   lineCount,
   fromFileRange
 ) => {
+  const { addedLines, unchangedLines } = filterChangesByType(groupChanges)
+  
   // Try to find the best target line in order of preference
   const firstDeletedLine = groupChanges.find(isDeletedLine)
   const firstUnchangedLine = groupChanges.find(isUnchangedLine)
-
-  const startLine =
-    firstDeletedLine?.lineBefore ?? // Deletions: use original line
-    firstUnchangedLine?.lineBefore ?? // Pure additions with context: position on context line
-    fromFileRange.start // Pure additions without context: use file range
+  
+  let startLine
+  
+  if (firstDeletedLine) {
+    // Deletions: use original line
+    startLine = firstDeletedLine.lineBefore
+  } else if (firstUnchangedLine && addedLines.length > 0) {
+    // Pure additions with context: check if context comes before or after additions
+    const contextLineComesFirst = firstUnchangedLine.lineAfter < addedLines[0].lineAfter
+    if (contextLineComesFirst) {
+      // Context line comes first: anchor to it
+      startLine = firstUnchangedLine.lineBefore
+    } else {
+      // Context line comes after: anchor to the line before it
+      startLine = firstUnchangedLine.lineBefore - 1
+    }
+  } else if (firstUnchangedLine) {
+    // Pure additions with context but no added lines (shouldn't happen)
+    startLine = firstUnchangedLine.lineBefore
+  } else {
+    // Pure additions without context: use file range
+    startLine = fromFileRange.start
+  }
 
   return { startLine, endLine: startLine + lineCount - 1 }
 }

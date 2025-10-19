@@ -63,6 +63,31 @@ exports[`Integration Tests > Suggestion Generation > markdownlint/default sugges
 ]
 `;
 
+exports[`Integration Tests > Suggestion Generation > new-file-issue/default suggestions should match snapshot 1`] = `
+[
+  {
+    "path": "test/fixtures/new-file-issue/before.md",
+    "body": "\`\`\`\`suggestion\\n## Example 1\\n\\n\`\`\`\`",
+    "line": 1
+  },
+  {
+    "path": "test/fixtures/new-file-issue/before.md",
+    "body": "\`\`\`\`suggestion\\n\\n\`\`\`\`",
+    "line": 2
+  },
+  {
+    "path": "test/fixtures/new-file-issue/before.md",
+    "body": "\`\`\`\`suggestion\\n\\n\`\`\`\`",
+    "line": 3
+  },
+  {
+    "path": "test/fixtures/new-file-issue/before.md",
+    "body": "\`\`\`\`suggestion\\n\`\`\`\\n\\n\`\`\`\`",
+    "line": 9
+  }
+]
+`;
+
 exports[`Integration Tests > Suggestion Generation > php-cs-fixer/default suggestions should match snapshot 1`] = `
 [
   {
