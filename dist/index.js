@@ -59229,35 +59229,21 @@ const calculateLinePosition = (
   lineCount,
   fromFileRange
 ) => {
-  const { addedLines, unchangedLines } = filterChangesByType(groupChanges)
+  const { addedLines } = filterChangesByType(groupChanges)
   
   // Try to find the best target line in order of preference
   const firstDeletedLine = groupChanges.find(isDeletedLine)
   const firstUnchangedLine = groupChanges.find(isUnchangedLine)
   
-  let startLine
-  
-  if (firstDeletedLine) {
-    // Deletions: use original line
-    startLine = firstDeletedLine.lineBefore
-  } else if (firstUnchangedLine && addedLines.length > 0) {
-    // Pure additions with context: check if context comes before or after additions
-    const contextLineComesFirst = firstUnchangedLine.lineAfter < addedLines[0].lineAfter
-    if (contextLineComesFirst) {
-      // Context line comes first: anchor to it
-      startLine = firstUnchangedLine.lineBefore
-    } else {
-      // Context line comes after: anchor to the line before it
-      // Use Math.max to ensure we don't get invalid line numbers (0 or negative)
-      startLine = Math.max(1, firstUnchangedLine.lineBefore - 1)
-    }
-  } else if (firstUnchangedLine) {
-    // Pure additions with context but no added lines (shouldn't happen)
-    startLine = firstUnchangedLine.lineBefore
-  } else {
-    // Pure additions without context: use file range
-    startLine = fromFileRange.start
-  }
+  // Determine anchor line based on the type of change
+  const startLine =
+    firstDeletedLine?.lineBefore ?? // Deletions: use original line
+    (firstUnchangedLine && addedLines.length > 0
+      ? // Pure additions with context: check if context comes before or after additions
+        firstUnchangedLine.lineAfter < addedLines[0].lineAfter
+        ? firstUnchangedLine.lineBefore // Context line comes first: anchor to it
+        : Math.max(1, firstUnchangedLine.lineBefore - 1) // Context line comes after: anchor to line before it
+      : firstUnchangedLine?.lineBefore ?? fromFileRange.start) // Fallback to context line or file range
 
   return { startLine, endLine: startLine + lineCount - 1 }
 }
