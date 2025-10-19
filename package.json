@@ -1,6 +1,6 @@
 {
   "name": "suggest-changes",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "A GitHub Action for turning working directory changes into pull request review suggestions",
   "license": "MIT",
   "type": "module",
