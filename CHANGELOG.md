@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.1](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.0...v3.0.1) (2025-10-19)
+
+
+### Bug Fixes
+
+* **deps:** bump @octokit/request-error from 7.0.0 to 7.0.1 ([#111](https://github.com/parkerbxyz/suggest-changes/issues/111)) ([b03f1f4](https://github.com/parkerbxyz/suggest-changes/commit/b03f1f4f4ec7b39fdf839d6a961cc473e17570d5))
+
 ## [3.0.0](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.7...v3.0.0) (2025-08-24)
 
 
