@@ -253,7 +253,8 @@ export const calculateLinePosition = (
       startLine = firstUnchangedLine.lineBefore
     } else {
       // Context line comes after: anchor to the line before it
-      startLine = firstUnchangedLine.lineBefore - 1
+      // Use Math.max to ensure we don't get invalid line numbers (0 or negative)
+      startLine = Math.max(1, firstUnchangedLine.lineBefore - 1)
     }
   } else if (firstUnchangedLine) {
     // Pure additions with context but no added lines (shouldn't happen)
