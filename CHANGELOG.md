@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.1](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.0...v3.0.1) (2025-10-19)
+
+
+### Bug Fixes
+
+* add draft review comments to debug logs ([#106](https://github.com/parkerbxyz/suggest-changes/issues/106)) ([5efd0b7](https://github.com/parkerbxyz/suggest-changes/commit/5efd0b75fb9df6a079b95405dd9d55ac16626f11))
+* **deps:** bump @octokit/request-error from 7.0.0 to 7.0.1 ([#111](https://github.com/parkerbxyz/suggest-changes/issues/111)) ([b03f1f4](https://github.com/parkerbxyz/suggest-changes/commit/b03f1f4f4ec7b39fdf839d6a961cc473e17570d5))
+
 ## [3.0.0](https://github.com/parkerbxyz/suggest-changes/compare/v2.0.7...v3.0.0) (2025-08-24)
 
 
