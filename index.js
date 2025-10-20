@@ -399,7 +399,7 @@ async function fetchCanonicalDiff(octokit, owner, repo, pull_number) {
 function buildRightSideAnchors(parsedDiff) {
   return Object.fromEntries(
     parsedDiff.files
-      .filter((file) => file.type === 'ChangedFile')
+      .filter((file) => file.type === 'ChangedFile' || file.type === 'AddedFile')
       .map((file) => [
         file.path,
         new Set(
