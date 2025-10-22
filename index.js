@@ -251,6 +251,14 @@ export const calculateLinePosition = (
   const firstDeletedLine = groupChanges.find(isDeletedLine)
   const firstUnchangedLine = unchangedLines.length > 0 ? unchangedLines[0] : undefined
   
+  // Log unexpected state: unchanged line present but no added lines
+  if (firstUnchangedLine && addedLines.length === 0 && !firstDeletedLine) {
+    debug(
+      `[BUG] Unexpected state: firstUnchangedLine present but addedLines.length === 0. ` +
+      `This branch should not be reached. groupChanges: ${JSON.stringify(groupChanges)}`
+    )
+  }
+  
   // Determine anchor line based on the type of change
   const startLine =
     firstDeletedLine?.lineBefore ?? // Deletions: use original line
