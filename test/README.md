@@ -15,8 +15,18 @@ This directory contains tests for the suggest-changes action using Node.js built
 
 - **Purpose**: Integration testing for suggestion generation from real fixtures
 - **Approach**: Uses native Node.js snapshot capabilities to verify suggestion comments generated from actual before/after file pairs
-- **Test Cases**: Full end-to-end testing of diff generation and suggestion creation
+- **Test Cases**: 
+  - **Suggestion Generation**: Full end-to-end testing of diff generation and suggestion creation with snapshot comparison
+  - **Suggestion Application**: Verifies that applying generated suggestions to the "before" state produces the "after" state, ensuring suggestions are correct and will work when applied in a PR
 - **Dependencies**: Imports real functions from `index.js` and uses shared `getGitDiff` utility
+
+The Suggestion Application tests simulate what happens when a user applies suggestions in a GitHub PR review. They:
+1. Read the before/after file pairs
+2. Generate suggestions from the diff
+3. Apply those suggestions to the before content
+4. Verify the result matches the after content
+
+This ensures that suggestions aren't just syntactically correct, but will actually produce the desired outcome when applied.
 
 ## Test fixtures
 
