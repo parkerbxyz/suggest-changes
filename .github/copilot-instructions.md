@@ -112,6 +112,22 @@ This is a GitHub Action that creates pull request review suggestions from workin
 5. Follow existing patterns and conventions
 6. Write or update tests for new functionality
 
+### Pull request conventions
+
+- Use conventional commit format for PR titles to ensure proper auto-release with [release-please](https://github.com/googleapis/release-please-action)
+- Follow the [Conventional Commits](https://www.conventionalcommits.org) specification
+- Format: `<type>[optional scope]: <description>`
+- Common types:
+  - `feat:` - New features (triggers minor version bump)
+  - `fix:` - Bug fixes (triggers patch version bump)
+  - `docs:` - Documentation changes
+  - `chore:` - Maintenance tasks
+  - `refactor:` - Code refactoring
+  - `test:` - Test updates
+  - `ci:` - CI/CD changes
+- Example: `feat: add support for multi-line suggestions`
+- Breaking changes: Add `!` after type or include `BREAKING CHANGE:` in PR body (triggers major version bump)
+
 ## Dependencies
 
 - Always check for security vulnerabilities before adding new dependencies
