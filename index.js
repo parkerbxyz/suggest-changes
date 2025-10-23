@@ -183,6 +183,18 @@ export const groupChangesForSuggestions = (changes) => {
 }
 
 /**
+ * Helper function to determine if context line comes before added lines.
+ * @param {UnchangedLine[]} unchangedLines - Array of unchanged lines
+ * @param {AddedLine[]} addedLines - Array of added lines
+ * @returns {boolean} True if context line comes before added lines
+ */
+const getContextLineComesFirst = (unchangedLines, addedLines) => {
+  return unchangedLines.length > 0 &&
+    addedLines.length > 0 &&
+    unchangedLines[0].lineAfter < addedLines[0].lineAfter
+}
+
+/**
  * Generate suggestion body and line count for a group of changes
  * @param {AnyLineChange[]} changes - Group of related changes
  * @returns {SuggestionBody | null} Suggestion body and line count, or null if no suggestion needed
@@ -199,14 +211,17 @@ export const generateSuggestionBody = (changes) => {
 
   // Pure additions: include context if available
   if (deletedLines.length === 0) {
-    const hasContext = unchangedLines.length > 0
-    const suggestionLines = hasContext
+    const contextLineComesFirst = getContextLineComesFirst(unchangedLines, addedLines)
+    
+    const suggestionLines = contextLineComesFirst
       ? [unchangedLines[0].content, ...addedLines.map((line) => line.content)]
       : addedLines.map((line) => line.content)
 
+    // lineCount represents the number of existing (anchor) lines being replaced,
+    // not the number of lines in the suggestion body (which can include context plus additions).
     return {
       body: createSuggestion(suggestionLines.join('\n')),
-      lineCount: hasContext ? 1 : addedLines.length,
+      lineCount: contextLineComesFirst ? 1 : addedLines.length,
     }
   }
 
@@ -230,14 +245,29 @@ export const calculateLinePosition = (
   lineCount,
   fromFileRange
 ) => {
+  const { addedLines, unchangedLines } = filterChangesByType(groupChanges)
+  
   // Try to find the best target line in order of preference
   const firstDeletedLine = groupChanges.find(isDeletedLine)
-  const firstUnchangedLine = groupChanges.find(isUnchangedLine)
-
+  const firstUnchangedLine = unchangedLines.length > 0 ? unchangedLines[0] : undefined
+  
+  // Log unexpected state: unchanged line present but no added lines
+  if (firstUnchangedLine && addedLines.length === 0 && !firstDeletedLine) {
+    debug(
+      `[BUG] Unexpected state: firstUnchangedLine present but addedLines.length === 0. ` +
+      `This branch should not be reached. groupChanges: ${JSON.stringify(groupChanges)}`
+    )
+  }
+  
+  // Determine anchor line based on the type of change
   const startLine =
     firstDeletedLine?.lineBefore ?? // Deletions: use original line
-    firstUnchangedLine?.lineBefore ?? // Pure additions with context: position on context line
-    fromFileRange.start // Pure additions without context: use file range
+    (firstUnchangedLine && addedLines.length > 0
+      ? // Pure additions with context: check if context comes before or after additions
+        getContextLineComesFirst(unchangedLines, addedLines)
+        ? firstUnchangedLine.lineBefore // Context line comes first: anchor to it
+        : Math.max(1, firstUnchangedLine.lineBefore - 1) // Context line comes after: anchor to line before it
+      : firstUnchangedLine?.lineBefore ?? fromFileRange.start) // Fallback to context line or file range
 
   return { startLine, endLine: startLine + lineCount - 1 }
 }
@@ -388,7 +418,7 @@ async function fetchCanonicalDiff(octokit, owner, repo, pull_number) {
 function buildRightSideAnchors(parsedDiff) {
   return Object.fromEntries(
     parsedDiff.files
-      .filter((file) => file.type === 'ChangedFile')
+      .filter((file) => file.type === 'ChangedFile' || file.type === 'AddedFile')
       .map((file) => [
         file.path,
         new Set(
