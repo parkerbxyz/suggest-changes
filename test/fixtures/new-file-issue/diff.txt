@@ -1,0 +1,16 @@
+diff --git a/test/fixtures/new-file-issue/before.md b/test/fixtures/new-file-issue/after.md
+index 83db783..aad0a0d 100644
+--- a/test/fixtures/new-file-issue/before.md
++++ b/test/fixtures/new-file-issue/after.md
+@@ -1,4 +1,7 @@
+ ## Example 1
++
+ Headings should be surrounded by blank lines.
++
+ ## Example 2
++
+ There should not be multiple consecutive blank lines.
+@@ -9,2 +12,3 @@ It even works with fenced code blocks!
+ ```
++
+ There should be a blank line above this one.
