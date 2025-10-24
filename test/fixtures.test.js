@@ -1,7 +1,7 @@
 // @ts-check
+import assert from 'node:assert'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import parseGitDiff from 'parse-git-diff'
 import { generateReviewComments, getGitDiff } from '../index.js'
@@ -36,7 +36,7 @@ async function generateDiff(beforeFile, afterFile) {
  */
 function applySuggestion(content, suggestion) {
   const lines = content.split('\n')
-  
+
   // Extract the suggestion body content (remove the ````suggestion wrapper)
   // Use greedy match (not *?) because the suggestion body always includes a newline before the closing ````
   const suggestionMatch = suggestion.body.match(/^````suggestion\n([\s\S]*)\n````$/)
@@ -48,23 +48,23 @@ function applySuggestion(content, suggestion) {
   }
   const suggestionContent = suggestionMatch[1]
   const suggestionLines = suggestionContent === '' ? [] : suggestionContent.split('\n')
-  
+
   // Determine which lines to replace
   // GitHub suggestions use 1-based line numbers
   const startLine = suggestion.start_line ?? suggestion.line
   const endLine = suggestion.line
-  
+
   // Convert to 0-based array indices
   const startIndex = startLine - 1
   const endIndex = endLine - 1
-  
+
   // Replace the lines
   const newLines = [
     ...lines.slice(0, startIndex),
     ...suggestionLines,
     ...lines.slice(endIndex + 1)
   ]
-  
+
   return newLines.join('\n')
 }
 
@@ -83,7 +83,7 @@ function applySuggestions(content, suggestions) {
     const bStart = b.start_line ?? b.line
     return bStart - aStart
   })
-  
+
   let result = content
   for (const suggestion of sortedSuggestions) {
     result = applySuggestion(result, suggestion)
@@ -172,15 +172,15 @@ describe('Integration Tests', () => {
           // Read the before and after files with normalized line endings
           const beforeContent = normalizeLineEndings(readFileSync(beforeFile, 'utf8'))
           const afterContent = normalizeLineEndings(readFileSync(afterFile, 'utf8'))
-          
+
           // Generate suggestions
           const diffContent = await generateDiff(beforeFile, afterFile)
           const parsed = parseGitDiff(diffContent)
           const suggestions = generateReviewComments(parsed)
-          
+
           // Apply suggestions to the before content
           const result = applySuggestions(beforeContent, suggestions)
-          
+
           // Verify that applying suggestions transforms before → after
           assert.strictEqual(
             result,
