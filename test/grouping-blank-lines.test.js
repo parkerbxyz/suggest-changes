@@ -1,7 +1,6 @@
 // @ts-check
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
-import parseGitDiff from 'parse-git-diff'
 import { groupChangesForSuggestions, generateSuggestionBody } from '../index.js'
 
 describe('Grouping algorithm for blank line insertions', () => {
