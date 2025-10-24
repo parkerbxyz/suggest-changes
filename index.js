@@ -135,14 +135,12 @@ const filterChangesByType = (changes) => ({
  * @returns {boolean} True if pattern matches
  */
 function isUnchangedFollowedByAdded(group) {
-  if (group.length === 0 || !isUnchangedLine(group[0])) return false
-
-  for (let i = 1; i < group.length; i++) {
-    if (!isAddedLine(group[i])) return false
-  }
-  return true
+  return (
+    group.length > 0 &&
+    isUnchangedLine(group[0]) &&
+    group.slice(1).every(isAddedLine)
+  )
 }
-
 /**
  * Check if current group should be closed for blank line insertion pattern.
  * Pattern: [Unchanged, Added...] followed by another Unchanged.
@@ -162,16 +160,13 @@ function shouldSplitForBlankLineInsertion(currentGroup, nextChange) {
  * @returns {number | null} Line number of last added or deleted line, or null if no such changes found
  */
 function getLastChangedLineNumber(group) {
-  for (let j = group.length - 1; j >= 0; j--) {
-    const prevChange = group[j]
-    if (isDeletedLine(prevChange)) {
-      return prevChange.lineBefore
-    }
-    if (isAddedLine(prevChange)) {
-      return prevChange.lineAfter
-    }
-  }
-  return null
+  const lastChange = group.findLast(
+    c => isDeletedLine(c) || isAddedLine(c)
+  )
+  if (!lastChange) return null
+  return isDeletedLine(lastChange)
+    ? lastChange.lineBefore
+    : lastChange.lineAfter
 }
 
 /**
