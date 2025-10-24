@@ -9,6 +9,15 @@ import { generateReviewComments, getGitDiff } from '../index.js'
 const fixtureDir = 'test/fixtures'
 
 /**
+ * Normalize line endings to LF for cross-platform consistency
+ * @param {string} content - File content to normalize
+ * @returns {string} Content with normalized line endings
+ */
+function normalizeLineEndings(content) {
+  return content.replace(/\r\n/g, '\n')
+}
+
+/**
  * Generate a git diff between two files using the same logic as index.js
  * @param {string} beforeFile - Path to the "before" file
  * @param {string} afterFile - Path to the "after" file
@@ -32,7 +41,10 @@ function applySuggestion(content, suggestion) {
   // Use greedy match (not *?) because the suggestion body always includes a newline before the closing ````
   const suggestionMatch = suggestion.body.match(/^````suggestion\n([\s\S]*)\n````$/)
   if (!suggestionMatch) {
-    throw new Error(`Invalid suggestion body format: ${suggestion.body}`)
+    throw new Error(
+      `Invalid suggestion body format. Expected format: \`\`\`\`suggestion\\n<content>\\n\`\`\`\`\n` +
+      `Received: ${suggestion.body}`
+    )
   }
   const suggestionContent = suggestionMatch[1]
   const suggestionLines = suggestionContent === '' ? [] : suggestionContent.split('\n')
@@ -148,11 +160,6 @@ describe('Integration Tests', () => {
     // Generate tests for all tool/testcase combinations
     // These tests verify that applying the generated suggestions to the "before" state
     // produces the "after" state, ensuring the suggestions are correct and complete.
-    //
-    // Note: Some test cases may fail if the suggestion generation logic has bugs.
-    // For example, pure additions where the added line comes before a context line
-    // may generate suggestions that don't correctly transform before → after.
-    // These test failures are valuable for identifying bugs in the suggestion logic.
     toolDirs
       .flatMap((toolDir) =>
         findBeforeAfterPairs(join(fixtureDir, toolDir)).map((pair) => ({
@@ -161,16 +168,10 @@ describe('Integration Tests', () => {
         }))
       )
       .forEach(({ toolDir, beforeFile, afterFile, testName }) => {
-        // Known issue: new-file-issue fixture exposes a bug in suggestion generation
-        // where pure additions with context coming after the added line generate
-        // incorrect suggestions that delete lines instead of adding blank lines.
-        // Skip this test until the suggestion generation logic is fixed.
-        const testFn = toolDir === 'new-file-issue' ? test.skip : test
-        
-        testFn(`${toolDir}/${testName} applying suggestions should transform before → after`, async () => {
-          // Read the before and after files
-          const beforeContent = readFileSync(beforeFile, 'utf8')
-          const afterContent = readFileSync(afterFile, 'utf8')
+        test(`${toolDir}/${testName} applying suggestions should transform before → after`, async () => {
+          // Read the before and after files with normalized line endings
+          const beforeContent = normalizeLineEndings(readFileSync(beforeFile, 'utf8'))
+          const afterContent = normalizeLineEndings(readFileSync(afterFile, 'utf8'))
           
           // Generate suggestions
           const diffContent = await generateDiff(beforeFile, afterFile)
