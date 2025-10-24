@@ -8,7 +8,7 @@ import { generateSuggestionBody, groupChangesForSuggestions } from '../index.js'
 // See https://github.com/parkerbxyz/suggest-changes/issues/118 for more context
 describe('Grouping algorithm for blank line insertions', () => {
   test('should create separate groups for each unchanged line followed by blank addition', () => {
-    // Simulates: Line A\n(add blank)\nLine B\n(add blank)\nLine C
+    // Simulates adding blank lines after Line A and Line B: Line A (add blank line), Line B (add blank line), Line C
     /** @type {import('../index.js').AnyLineChange[]} */
     const changes = [
       { type: 'UnchangedLine', lineBefore: 1, lineAfter: 1, content: 'Line A' },
