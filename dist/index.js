@@ -59290,18 +59290,33 @@ const generateSuggestionBody = (changes) => {
     const added = addedLines[0]
     
     // If the deleted and added content is the same, this is a line movement
-    // We should suggest adding blank lines, not replacing the line with itself
     if (deleted.content === added.content) {
-      // Find the unchanged line before the deletion (the line we want to add blank after)
+      // Find the unchanged line before the deletion
       const unchangedBeforeDeletion = unchangedLines.find(
         (u) => u.lineBefore < deleted.lineBefore
       )
       
       if (unchangedBeforeDeletion) {
-        // Suggest adding blank line after the unchanged line
+        // Count how many unchanged blank lines come after the deleted line in the before file
+        // These blanks will end up after the moved line, but we only want to keep N-1 of them
+        const blanksAfterDeletion = unchangedLines.filter(
+          (u) => u.lineBefore > deleted.lineBefore && u.content === ''
+        )
+        
+        // Build suggestion: unchangedLine + blank + moved line + (keep N-1 blanks)
+        const suggestionLines = [unchangedBeforeDeletion.content, '', deleted.content]
+        
+        // Add back one fewer blank than existed to remove consecutive blanks
+        for (let i = 1; i < blanksAfterDeletion.length; i++) {
+          suggestionLines.push('')
+        }
+        
+        // LineCount: we're replacing the unchanged line + deleted line + all the blank lines
+        const lineCount = 1 + 1 + blanksAfterDeletion.length
+        
         return {
-          body: createSuggestion(unchangedBeforeDeletion.content + '\n'),
-          lineCount: 1,
+          body: createSuggestion(suggestionLines.join('\n')),
+          lineCount: lineCount,
         }
       }
     }
