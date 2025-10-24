@@ -59522,6 +59522,15 @@ function generateReviewComments(
     const draft = buildCommentDraft(path, fromFileRange, group)
     if (draft) drafts.push(draft)
   }
+  
+  // Log all generated suggestions with detailed debug info
+  if (drafts.length) {
+    (0,core.debug)(`Generated suggestions: ${drafts.length}`)
+    logDetailedCommentDebugInfo(drafts)
+  } else {
+    (0,core.debug)('Generated suggestions: 0')
+  }
+  
   const { pass: unique, fail: skipped } = partition(
     drafts,
     (draft) => !existingCommentKeys.has(generateCommentKey(draft))
@@ -59609,6 +59618,30 @@ function isValidSuggestion(comment, anchors) {
   if (comment.start_line !== undefined && !validLines.has(comment.start_line))
     return false
   return true
+}
+
+/**
+ * Log detailed debug output for review comment drafts.
+ * @param {ReviewCommentDraft[]} comments
+ */
+function logDetailedCommentDebugInfo(comments) {
+  for (const comment of comments) {
+    (0,core.debug)(`- Draft review comment:`)
+    ;(0,core.debug)(`  path: ${comment.path}`)
+    ;(0,core.debug)(`  line: ${comment.line}`)
+    if (comment.start_line !== undefined) {
+      (0,core.debug)(`  start_line: ${comment.start_line}`)
+    }
+    if (comment.start_side !== undefined) {
+      (0,core.debug)(`  start_side: ${comment.start_side}`)
+    }
+    (0,core.debug)(`  body:`)
+    const indentedBody = comment.body
+      .split('\n')
+      .map((line) => `  ${line}`)
+      .join('\n')
+    ;(0,core.debug)(indentedBody)
+  }
 }
 
 /**
@@ -59705,28 +59738,6 @@ async function run({
     parsedDiff,
     existingCommentKeys
   )
-  if (initialComments.length) {
-    (0,core.debug)(`Generated suggestions: ${initialComments.length}`)
-    for (const comment of initialComments) {
-      ;(0,core.debug)(`- Draft review comment:`)
-      ;(0,core.debug)(`  path: ${comment.path}`)
-      ;(0,core.debug)(`  line: ${comment.line}`)
-      if (comment.start_line !== undefined) {
-        (0,core.debug)(`  start_line: ${comment.start_line}`)
-      }
-      if (comment.start_side !== undefined) {
-        (0,core.debug)(`  start_side: ${comment.start_side}`)
-      }
-      (0,core.debug)(`  body:`)
-      const indentedBody = comment.body
-        .split('\n')
-        .map((line) => `  ${line}`)
-        .join('\n')
-      ;(0,core.debug)(indentedBody)
-    }
-  } else {
-    (0,core.debug)('Generated suggestions: 0')
-  }
   const comments = await filterSuggestionsInPullRequestDiff({
     octokit,
     owner,
