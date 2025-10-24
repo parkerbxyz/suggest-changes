@@ -294,12 +294,6 @@ export const generateSuggestionBody = (changes) => {
 
   // Detect line movement: deletion and addition of same content.
   // This happens when linters move lines to insert blank lines before them.
-  //
-  // ISSUE: Multi-line suggestions cause problems with GitHub's batch application.
-  // When users accept multiple suggestions at once, GitHub can lose content.
-  //
-  // SOLUTION: For line movements, create a simple single-line suggestion to add a blank
-  // after the context line. This won't remove consecutive blanks, but it's safer for batching.
   if (deletedLines.length === 1 && addedLines.length === 1) {
     const deleted = deletedLines[0]
     const added = addedLines[0]
@@ -312,11 +306,38 @@ export const generateSuggestionBody = (changes) => {
       )
 
       if (unchangedBeforeDeletion) {
-        // Create a simple single-line suggestion to add a blank after the context line
-        // This avoids multi-line suggestions that cause batching issues
+        // Count unchanged blank lines after the deleted line in the original file.
+        // When the line moves up, these blanks end up after it in the new position.
+        // To avoid consecutive blanks, we keep N-1 of them (removing one redundant blank).
+        const blanksAfterDeletion = unchangedLines.filter(
+          (u) => u.lineBefore > deleted.lineBefore && u.content === ''
+        )
+
+        // Build suggestion to show what the final state should be:
+        // 1. Context line (unchanged before deletion)
+        // 2. New blank line (being inserted)
+        // 3. Moved content line
+        // 4. Keep N-1 of the existing trailing blanks to maintain the same total number of blanks
+        //    (we're adding 1 new blank, so we keep N-1 existing ones to avoid increasing the total)
+        const suggestionLines = [
+          unchangedBeforeDeletion.content,
+          '',
+          deleted.content,
+        ]
+
+        // Keep only N-1 existing blanks by skipping the first (index 0) using slice(1)
+        // This maintains the same total blank line count after inserting the new blank
+        blanksAfterDeletion.slice(1).forEach(() => suggestionLines.push(''))
+
+        // Calculate total lines being replaced in the suggestion:
+        // - 1 unchanged context line
+        // - 1 deleted/moved line
+        // - N trailing blank lines after deletion
+        const totalReplacedLines = 1 + 1 + blanksAfterDeletion.length
+
         return {
-          body: createSuggestion(unchangedBeforeDeletion.content + '\n'),
-          lineCount: 1,
+          body: createSuggestion(suggestionLines.join('\n')),
+          lineCount: totalReplacedLines,
         }
       }
     }
@@ -465,7 +486,7 @@ function buildCommentDraft(path, fromFileRange, group) {
     line: endLine,
     ...(lineCount > 1 && {
       start_line: startLine,
-      start_side: 'RIGHT',
+      start_side: 'LEFT',
     }),
   })
 }
