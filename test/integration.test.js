@@ -29,7 +29,7 @@ function applySuggestion(content, suggestion) {
   const lines = content.split('\n')
   
   // Extract the suggestion body content (remove the ````suggestion wrapper)
-  // Use greedy match (not *?) because createSuggestion always adds \n before ````
+  // Use greedy match (not *?) because the suggestion body always includes a newline before the closing ````
   const suggestionMatch = suggestion.body.match(/^````suggestion\n([\s\S]*)\n````$/)
   if (!suggestionMatch) {
     throw new Error(`Invalid suggestion body format: ${suggestion.body}`)
