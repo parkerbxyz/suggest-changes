@@ -59323,11 +59323,9 @@ const generateSuggestionBody = (changes) => {
           deleted.content,
         ]
 
-        // Loop starts at 1 to keep only N-1 existing blanks (index 0 is skipped)
+        // Keep only N-1 existing blanks by skipping the first (index 0) using slice(1)
         // This maintains the same total blank line count after inserting the new blank
-        for (let i = 1; i < blanksAfterDeletion.length; i++) {
-          suggestionLines.push('')
-        }
+        blanksAfterDeletion.slice(1).forEach(() => suggestionLines.push(''))
 
         // Calculate total lines being replaced in the suggestion:
         // - 1 unchanged context line
