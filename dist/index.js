@@ -59149,11 +59149,11 @@ function isUnchangedFollowedByAdded(group) {
 function isLineMovement(currentGroup, nextChange, remainingChanges) {
   // Check if nextChange is an added line
   if (!isAddedLine(nextChange)) return false
-  
+
   // Look for a deleted line in the current group
   const deletedLine = currentGroup.find(isDeletedLine)
   if (!deletedLine) return false
-  
+
   // Check if the deleted and added lines have the same content
   // This indicates the line is being moved, not changed
   return deletedLine.content === nextChange.content
@@ -59238,7 +59238,11 @@ const groupChangesForSuggestions = (changes) => {
     const lastChangedLineNumber = getLastChangedLineNumber(currentGroup)
 
     // Check if this looks like a line movement before applying gap detection
-    const appearsToBeLineMovement = isLineMovement(currentGroup, change, remainingChanges)
+    const appearsToBeLineMovement = isLineMovement(
+      currentGroup,
+      change,
+      remainingChanges
+    )
 
     // Start new group if there's a line gap between actual changes (not unchanged lines)
     // BUT: Don't split if this appears to be a line movement (delete + re-add same content)
@@ -59283,40 +59287,57 @@ const generateSuggestionBody = (changes) => {
   const { addedLines, deletedLines, unchangedLines } =
     filterChangesByType(changes)
 
-  // Detect line movement: deletion and addition of same content
-  // This happens when linters move lines to insert blank lines before them
+  // Detect line movement: deletion and addition of same content.
+  // This happens when linters move lines to insert blank lines before them.
+  // Example: Line "foo" at position 5 is deleted and re-added at position 3.
+  // Without this special handling, we'd suggest "replace 'foo' with 'foo'" (confusing no-op).
+  // Instead, we suggest inserting a blank line before the moved content.
   if (deletedLines.length === 1 && addedLines.length === 1) {
     const deleted = deletedLines[0]
     const added = addedLines[0]
-    
+
     // If the deleted and added content is the same, this is a line movement
     if (deleted.content === added.content) {
-      // Find the unchanged line before the deletion
+      // Find the unchanged line before the deletion (context line)
       const unchangedBeforeDeletion = unchangedLines.find(
         (u) => u.lineBefore < deleted.lineBefore
       )
-      
+
       if (unchangedBeforeDeletion) {
-        // Count how many unchanged blank lines come after the deleted line in the before file
-        // These blanks will end up after the moved line, but we only want to keep N-1 of them
+        // Count unchanged blank lines after the deleted line in the original file.
+        // When the line moves up, these blanks end up after it in the new position.
+        // To avoid consecutive blanks, we keep N-1 of them (removing one redundant blank).
         const blanksAfterDeletion = unchangedLines.filter(
           (u) => u.lineBefore > deleted.lineBefore && u.content === ''
         )
-        
-        // Build suggestion: unchangedLine + blank + moved line + (keep N-1 blanks)
-        const suggestionLines = [unchangedBeforeDeletion.content, '', deleted.content]
-        
-        // Add back one fewer blank than existed to remove consecutive blanks
+
+        // Build suggestion to show what the final state should be:
+        // 1. Context line (unchanged before deletion)
+        // 2. New blank line (being inserted)
+        // 3. Moved content line
+        // 4. Keep N-1 of the existing trailing blanks to maintain the same total number of blanks
+        //    (we're adding 1 new blank, so we keep N-1 existing ones to avoid increasing the total)
+        const suggestionLines = [
+          unchangedBeforeDeletion.content,
+          '',
+          deleted.content,
+        ]
+
+        // Loop starts at 1 to keep only N-1 existing blanks (index 0 is skipped)
+        // This maintains the same total blank line count after inserting the new blank
         for (let i = 1; i < blanksAfterDeletion.length; i++) {
           suggestionLines.push('')
         }
-        
-        // LineCount: we're replacing the unchanged line + deleted line + all the blank lines
-        const lineCount = 1 + 1 + blanksAfterDeletion.length
-        
+
+        // Calculate total lines being replaced in the suggestion:
+        // - 1 unchanged context line
+        // - 1 deleted/moved line
+        // - N trailing blank lines after deletion
+        const totalReplacedLines = 1 + 1 + blanksAfterDeletion.length
+
         return {
           body: createSuggestion(suggestionLines.join('\n')),
-          lineCount: lineCount,
+          lineCount: totalReplacedLines,
         }
       }
     }
@@ -59367,7 +59388,8 @@ const calculateLinePosition = (
   lineCount,
   fromFileRange
 ) => {
-  const { addedLines, deletedLines, unchangedLines } = filterChangesByType(groupChanges)
+  const { addedLines, deletedLines, unchangedLines } =
+    filterChangesByType(groupChanges)
 
   // Try to find the best target line in order of preference
   const firstDeletedLine = groupChanges.find(isDeletedLine)
