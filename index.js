@@ -141,6 +141,29 @@ function isUnchangedFollowedByAdded(group) {
     group.slice(1).every(isAddedLine)
   )
 }
+
+/**
+ * Detect if the group contains a line movement pattern where content is deleted
+ * and re-added at a different location (typically to insert blank lines).
+ * Pattern: [..., Deleted line, Unchanged line(s), upcoming Added line with same content]
+ * @param {AnyLineChange[]} currentGroup - Current group being built
+ * @param {AnyLineChange} nextChange - Next change to potentially add
+ * @param {AnyLineChange[]} remainingChanges - All changes after nextChange
+ * @returns {boolean} True if this appears to be a line movement
+ */
+function isLineMovement(currentGroup, nextChange, remainingChanges) {
+  // Check if nextChange is an added line
+  if (!isAddedLine(nextChange)) return false
+  
+  // Look for a deleted line in the current group
+  const deletedLine = currentGroup.find(isDeletedLine)
+  if (!deletedLine) return false
+  
+  // Check if the deleted and added lines have the same content
+  // This indicates the line is being moved, not changed
+  return deletedLine.content === nextChange.content
+}
+
 /**
  * Check if current group should be closed for blank line insertion pattern.
  * Pattern: [Unchanged, Added...] followed by another Unchanged.
@@ -179,6 +202,10 @@ function getLastChangedLineNumber(group) {
  * We split these into separate [Unchanged, Add("")] pairs to create intuitive suggestions
  * that show adding a blank line after each content line, rather than confusing multi-line groups.
  *
+ * Special case for line movements:
+ * When a line is deleted and re-added at a different location (e.g., to insert blank lines before it),
+ * we keep the deletion and addition in the same group to avoid creating separate delete/add suggestions.
+ *
  * @param {AnyLineChange[]} changes - Array of line changes from git diff
  * @returns {AnyLineChange[][]} Array of suggestion groups
  */
@@ -192,6 +219,7 @@ export const groupChangesForSuggestions = (changes) => {
 
   for (let i = 0; i < changes.length; i++) {
     const change = changes[i]
+    const remainingChanges = changes.slice(i + 1)
 
     // Check if we should split the group for blank line insertion pattern
     if (shouldSplitForBlankLineInsertion(currentGroup, change)) {
@@ -214,11 +242,16 @@ export const groupChangesForSuggestions = (changes) => {
     // Get the last changed line number (ignoring unchanged lines)
     const lastChangedLineNumber = getLastChangedLineNumber(currentGroup)
 
+    // Check if this looks like a line movement before applying gap detection
+    const appearsToBeLineMovement = isLineMovement(currentGroup, change, remainingChanges)
+
     // Start new group if there's a line gap between actual changes (not unchanged lines)
+    // BUT: Don't split if this appears to be a line movement (delete + re-add same content)
     if (
       !isUnchangedLine(change) &&
       lastChangedLineNumber !== null &&
-      lineNumber > lastChangedLineNumber + 1
+      lineNumber > lastChangedLineNumber + 1 &&
+      !appearsToBeLineMovement
     ) {
       groups.push(currentGroup)
       currentGroup = []
@@ -254,6 +287,30 @@ const getContextLineComesFirst = (unchangedLines, addedLines) => {
 export const generateSuggestionBody = (changes) => {
   const { addedLines, deletedLines, unchangedLines } =
     filterChangesByType(changes)
+
+  // Detect line movement: deletion and addition of same content
+  // This happens when linters move lines to insert blank lines before them
+  if (deletedLines.length === 1 && addedLines.length === 1) {
+    const deleted = deletedLines[0]
+    const added = addedLines[0]
+    
+    // If the deleted and added content is the same, this is a line movement
+    // We should suggest adding blank lines, not replacing the line with itself
+    if (deleted.content === added.content) {
+      // Find the unchanged line before the deletion (the line we want to add blank after)
+      const unchangedBeforeDeletion = unchangedLines.find(
+        (u) => u.lineBefore < deleted.lineBefore
+      )
+      
+      if (unchangedBeforeDeletion) {
+        // Suggest adding blank line after the unchanged line
+        return {
+          body: createSuggestion(unchangedBeforeDeletion.content + '\n'),
+          lineCount: 1,
+        }
+      }
+    }
+  }
 
   // No additions means no content to suggest, except for pure deletions (empty replacement block)
   if (addedLines.length === 0) {
@@ -300,7 +357,7 @@ export const calculateLinePosition = (
   lineCount,
   fromFileRange
 ) => {
-  const { addedLines, unchangedLines } = filterChangesByType(groupChanges)
+  const { addedLines, deletedLines, unchangedLines } = filterChangesByType(groupChanges)
 
   // Try to find the best target line in order of preference
   const firstDeletedLine = groupChanges.find(isDeletedLine)
@@ -315,6 +372,20 @@ export const calculateLinePosition = (
           groupChanges
         )}`
     )
+  }
+
+  // Check for line movement: if we have deletion and addition of same content,
+  // anchor to the unchanged line before the deletion
+  if (
+    deletedLines.length === 1 &&
+    addedLines.length === 1 &&
+    deletedLines[0].content === addedLines[0].content &&
+    firstUnchangedLine &&
+    firstUnchangedLine.lineBefore < deletedLines[0].lineBefore
+  ) {
+    // Line movement: anchor to the unchanged line before the deletion
+    const startLine = firstUnchangedLine.lineBefore
+    return { startLine, endLine: startLine + lineCount - 1 }
   }
 
   // Determine anchor line based on the type of change
