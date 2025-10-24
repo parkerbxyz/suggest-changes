@@ -59124,40 +59124,84 @@ const filterChangesByType = (changes) => ({
 })
 
 /**
+ * Check if group matches pattern: first is unchanged, rest are all added lines.
+ * This pattern indicates blank line insertions after content lines.
+ * @param {AnyLineChange[]} group - Group of changes to check
+ * @returns {boolean} True if pattern matches
+ */
+function isUnchangedFollowedByAdded(group) {
+  if (group.length === 0 || !isUnchangedLine(group[0])) return false
+
+  for (let i = 1; i < group.length; i++) {
+    if (!isAddedLine(group[i])) return false
+  }
+  return true
+}
+
+/**
+ * Check if current group should be closed for blank line insertion pattern.
+ * Pattern: [Unchanged, Added...] followed by another Unchanged.
+ * This helps create clean [Unchanged, Added] pairs for blank line insertions.
+ * @param {AnyLineChange[]} currentGroup - Current group being built
+ * @param {AnyLineChange} nextChange - Next change to potentially add
+ * @returns {boolean} True if group should be closed
+ */
+function shouldSplitForBlankLineInsertion(currentGroup, nextChange) {
+  return isUnchangedFollowedByAdded(currentGroup) && isUnchangedLine(nextChange)
+}
+
+/**
+ * Find the line number of the last actual change (ignoring unchanged lines).
+ * Used to detect gaps between changes for proper grouping.
+ * @param {AnyLineChange[]} group - Group to search
+ * @returns {number | null} Line number of last change, or null if no changes found
+ */
+function getLastChangedLineNumber(group) {
+  for (let j = group.length - 1; j >= 0; j--) {
+    const prevChange = group[j]
+    if (isDeletedLine(prevChange)) {
+      return prevChange.lineBefore
+    }
+    if (isAddedLine(prevChange)) {
+      return prevChange.lineAfter
+    }
+  }
+  return null
+}
+
+/**
  * Group changes into logical suggestion groups based on line proximity.
  *
  * Groups contiguous or nearly contiguous changes together to create logical
  * suggestions that make sense when reviewing code. Unchanged lines are included
  * for context but don't affect contiguity calculations.
  *
- * However, when we have patterns like [Unchanged, Add, Unchanged, Add, Unchanged],
- * we split into separate groups [Unchanged, Add] to avoid confusing suggestions.
+ * Special case for blank line insertions (https://github.com/parkerbxyz/suggest-changes/issues/118):
+ * When linters add blank lines, we get patterns like [Unchanged, Add(""), Unchanged, Add(""), ...].
+ * We split these into separate [Unchanged, Add("")] pairs to create intuitive suggestions
+ * that show adding a blank line after each content line, rather than confusing multi-line groups.
  *
  * @param {AnyLineChange[]} changes - Array of line changes from git diff
  * @returns {AnyLineChange[][]} Array of suggestion groups
  */
 const groupChangesForSuggestions = (changes) => {
   if (changes.length === 0) return []
-  
+
+  /** @type {AnyLineChange[][]} */
   const groups = []
+  /** @type {AnyLineChange[]} */
   let currentGroup = []
-  
+
   for (let i = 0; i < changes.length; i++) {
     const change = changes[i]
-    
-    // Special case: When we have [Unchanged, Added], and the next change is Unchanged,
-    // close the current group to create clean [Unchanged, Added] pairs for blank line insertions
-    if (
-      currentGroup.length >= 1 &&
-      isUnchangedLine(currentGroup[0]) &&
-      currentGroup.slice(1).every(isAddedLine) &&
-      isUnchangedLine(change)
-    ) {
+
+    // Check if we should split the group for blank line insertion pattern
+    if (shouldSplitForBlankLineInsertion(currentGroup, change)) {
       groups.push(currentGroup)
       currentGroup = [change]
       continue
     }
-    
+
     // Determine line number for gap detection
     const lineNumber = isDeletedLine(change)
       ? change.lineBefore
@@ -59169,18 +59213,8 @@ const groupChangesForSuggestions = (changes) => {
 
     if (lineNumber === null) continue
 
-    // Calculate the last changed line number (ignoring unchanged lines)
-    let lastChangedLineNumber = null
-    for (let j = currentGroup.length - 1; j >= 0; j--) {
-      const prevChange = currentGroup[j]
-      if (isDeletedLine(prevChange)) {
-        lastChangedLineNumber = prevChange.lineBefore
-        break
-      } else if (isAddedLine(prevChange)) {
-        lastChangedLineNumber = prevChange.lineAfter
-        break
-      }
-    }
+    // Get the last changed line number (ignoring unchanged lines)
+    const lastChangedLineNumber = getLastChangedLineNumber(currentGroup)
 
     // Start new group if there's a line gap between actual changes (not unchanged lines)
     if (
@@ -59207,9 +59241,11 @@ const groupChangesForSuggestions = (changes) => {
  * @returns {boolean} True if context line comes before added lines
  */
 const getContextLineComesFirst = (unchangedLines, addedLines) => {
-  return unchangedLines.length > 0 &&
+  return (
+    unchangedLines.length > 0 &&
     addedLines.length > 0 &&
     unchangedLines[0].lineAfter < addedLines[0].lineAfter
+  )
 }
 
 /**
@@ -59229,8 +59265,11 @@ const generateSuggestionBody = (changes) => {
 
   // Pure additions: include context if available
   if (deletedLines.length === 0) {
-    const contextLineComesFirst = getContextLineComesFirst(unchangedLines, addedLines)
-    
+    const contextLineComesFirst = getContextLineComesFirst(
+      unchangedLines,
+      addedLines
+    )
+
     const suggestionLines = contextLineComesFirst
       ? [unchangedLines[0].content, ...addedLines.map((line) => line.content)]
       : addedLines.map((line) => line.content)
@@ -59264,19 +59303,22 @@ const calculateLinePosition = (
   fromFileRange
 ) => {
   const { addedLines, unchangedLines } = filterChangesByType(groupChanges)
-  
+
   // Try to find the best target line in order of preference
   const firstDeletedLine = groupChanges.find(isDeletedLine)
-  const firstUnchangedLine = unchangedLines.length > 0 ? unchangedLines[0] : undefined
-  
+  const firstUnchangedLine =
+    unchangedLines.length > 0 ? unchangedLines[0] : undefined
+
   // Log unexpected state: unchanged line present but no added lines
   if (firstUnchangedLine && addedLines.length === 0 && !firstDeletedLine) {
     (0,core.debug)(
       `[BUG] Unexpected state: firstUnchangedLine present but addedLines.length === 0. ` +
-      `This branch should not be reached. groupChanges: ${JSON.stringify(groupChanges)}`
+        `This branch should not be reached. groupChanges: ${JSON.stringify(
+          groupChanges
+        )}`
     )
   }
-  
+
   // Determine anchor line based on the type of change
   const startLine =
     firstDeletedLine?.lineBefore ?? // Deletions: use original line
@@ -59436,7 +59478,9 @@ async function fetchCanonicalDiff(octokit, owner, repo, pull_number) {
 function buildRightSideAnchors(parsedDiff) {
   return Object.fromEntries(
     parsedDiff.files
-      .filter((file) => file.type === 'ChangedFile' || file.type === 'AddedFile')
+      .filter(
+        (file) => file.type === 'ChangedFile' || file.type === 'AddedFile'
+      )
       .map((file) => [
         file.path,
         new Set(
@@ -59536,7 +59580,7 @@ async function filterSuggestionsInPullRequestDiff({
  * @param {string} options.diff - Git diff output
  * @param {ReviewEvent} options.event - Review event type
  * @param {string} options.body - Review body
- * @returns {Promise<{comments: Array, reviewCreated: boolean}>} Result of the action
+ * @returns {Promise<{comments: ReviewCommentDraft[], reviewCreated: boolean}>} Result of the action
  */
 async function run({
   octokit,
@@ -59575,7 +59619,10 @@ async function run({
         (0,core.debug)(`  start_side: ${comment.start_side}`)
       }
       (0,core.debug)(`  body:`)
-      const indentedBody = comment.body.split('\n').map(line => `  ${line}`).join('\n')
+      const indentedBody = comment.body
+        .split('\n')
+        .map((line) => `  ${line}`)
+        .join('\n')
       ;(0,core.debug)(indentedBody)
     }
   } else {
