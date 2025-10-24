@@ -527,6 +527,15 @@ export function generateReviewComments(
     const draft = buildCommentDraft(path, fromFileRange, group)
     if (draft) drafts.push(draft)
   }
+  
+  // Log all generated suggestions with detailed debug info
+  if (drafts.length) {
+    debug(`Generated suggestions: ${drafts.length}`)
+    logDetailedCommentDebugInfo(drafts)
+  } else {
+    debug('Generated suggestions: 0')
+  }
+  
   const { pass: unique, fail: skipped } = partition(
     drafts,
     (draft) => !existingCommentKeys.has(generateCommentKey(draft))
@@ -614,6 +623,30 @@ function isValidSuggestion(comment, anchors) {
   if (comment.start_line !== undefined && !validLines.has(comment.start_line))
     return false
   return true
+}
+
+/**
+ * Log detailed debug output for review comment drafts.
+ * @param {ReviewCommentDraft[]} comments
+ */
+function logDetailedCommentDebugInfo(comments) {
+  for (const comment of comments) {
+    debug(`- Draft review comment:`)
+    debug(`  path: ${comment.path}`)
+    debug(`  line: ${comment.line}`)
+    if (comment.start_line !== undefined) {
+      debug(`  start_line: ${comment.start_line}`)
+    }
+    if (comment.start_side !== undefined) {
+      debug(`  start_side: ${comment.start_side}`)
+    }
+    debug(`  body:`)
+    const indentedBody = comment.body
+      .split('\n')
+      .map((line) => `  ${line}`)
+      .join('\n')
+    debug(indentedBody)
+  }
 }
 
 /**
@@ -710,28 +743,6 @@ export async function run({
     parsedDiff,
     existingCommentKeys
   )
-  if (initialComments.length) {
-    debug(`Generated suggestions: ${initialComments.length}`)
-    for (const comment of initialComments) {
-      debug(`- Draft review comment:`)
-      debug(`  path: ${comment.path}`)
-      debug(`  line: ${comment.line}`)
-      if (comment.start_line !== undefined) {
-        debug(`  start_line: ${comment.start_line}`)
-      }
-      if (comment.start_side !== undefined) {
-        debug(`  start_side: ${comment.start_side}`)
-      }
-      debug(`  body:`)
-      const indentedBody = comment.body
-        .split('\n')
-        .map((line) => `  ${line}`)
-        .join('\n')
-      debug(indentedBody)
-    }
-  } else {
-    debug('Generated suggestions: 0')
-  }
   const comments = await filterSuggestionsInPullRequestDiff({
     octokit,
     owner,
