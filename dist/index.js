@@ -59130,20 +59130,35 @@ const filterChangesByType = (changes) => ({
  * suggestions that make sense when reviewing code. Unchanged lines are included
  * for context but don't affect contiguity calculations.
  *
+ * However, when we have patterns like [Unchanged, Add, Unchanged, Add, Unchanged],
+ * we split into separate groups [Unchanged, Add] to avoid confusing suggestions.
+ *
  * @param {AnyLineChange[]} changes - Array of line changes from git diff
  * @returns {AnyLineChange[][]} Array of suggestion groups
  */
 const groupChangesForSuggestions = (changes) => {
   if (changes.length === 0) return []
-  // Group by line proximity using appropriate coordinate systems
-  // - Deletions use lineBefore (original file line numbers)
-  // - Additions use lineAfter (new file line numbers)
-  // - Unchanged use lineBefore (context positioning)
+  
   const groups = []
   let currentGroup = []
-  let lastChangedLineNumber = null
-
-  for (const change of changes) {
+  
+  for (let i = 0; i < changes.length; i++) {
+    const change = changes[i]
+    
+    // Special case: When we have [Unchanged, Added], and the next change is Unchanged,
+    // close the current group to create clean [Unchanged, Added] pairs for blank line insertions
+    if (
+      currentGroup.length >= 1 &&
+      isUnchangedLine(currentGroup[0]) &&
+      currentGroup.slice(1).every(isAddedLine) &&
+      isUnchangedLine(change)
+    ) {
+      groups.push(currentGroup)
+      currentGroup = [change]
+      continue
+    }
+    
+    // Determine line number for gap detection
     const lineNumber = isDeletedLine(change)
       ? change.lineBefore
       : isAddedLine(change)
@@ -59153,6 +59168,19 @@ const groupChangesForSuggestions = (changes) => {
       : null
 
     if (lineNumber === null) continue
+
+    // Calculate the last changed line number (ignoring unchanged lines)
+    let lastChangedLineNumber = null
+    for (let j = currentGroup.length - 1; j >= 0; j--) {
+      const prevChange = currentGroup[j]
+      if (isDeletedLine(prevChange)) {
+        lastChangedLineNumber = prevChange.lineBefore
+        break
+      } else if (isAddedLine(prevChange)) {
+        lastChangedLineNumber = prevChange.lineAfter
+        break
+      }
+    }
 
     // Start new group if there's a line gap between actual changes (not unchanged lines)
     if (
@@ -59165,11 +59193,6 @@ const groupChangesForSuggestions = (changes) => {
     }
 
     currentGroup.push(change)
-
-    // Only track line numbers for actual changes (deletions and additions)
-    if (!isUnchangedLine(change)) {
-      lastChangedLineNumber = lineNumber
-    }
   }
 
   if (currentGroup.length > 0) groups.push(currentGroup)

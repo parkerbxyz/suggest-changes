@@ -72,18 +72,23 @@ exports[`Integration Tests > Suggestion Generation > new-file-issue/default sugg
   },
   {
     "path": "test/fixtures/new-file-issue/before.md",
-    "body": "\`\`\`\`suggestion\\n\\n\`\`\`\`",
+    "body": "\`\`\`\`suggestion\\nHeadings should be surrounded by blank lines.\\n\\n\`\`\`\`",
     "line": 2
   },
   {
     "path": "test/fixtures/new-file-issue/before.md",
-    "body": "\`\`\`\`suggestion\\n\\n\`\`\`\`",
+    "body": "\`\`\`\`suggestion\\n## Example 2\\n\\n\`\`\`\`",
     "line": 3
   },
   {
     "path": "test/fixtures/new-file-issue/before.md",
+    "body": "\`\`\`\`suggestion\\n\\n\\n\`\`\`\`",
+    "line": 5
+  },
+  {
+    "path": "test/fixtures/new-file-issue/before.md",
     "body": "\`\`\`\`suggestion\\n\`\`\`\\n\\n\`\`\`\`",
-    "line": 9
+    "line": 8
   }
 ]
 `;
