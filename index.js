@@ -160,9 +160,7 @@ function shouldSplitForBlankLineInsertion(currentGroup, nextChange) {
  * @returns {number | null} Line number of last added or deleted line, or null if no such changes found
  */
 function getLastChangedLineNumber(group) {
-  const lastChange = group.findLast(
-    c => isDeletedLine(c) || isAddedLine(c)
-  )
+  const lastChange = group.findLast((c) => isDeletedLine(c) || isAddedLine(c))
   if (!lastChange) return null
   return isDeletedLine(lastChange)
     ? lastChange.lineBefore
