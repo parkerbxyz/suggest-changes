@@ -59151,10 +59151,10 @@ function shouldSplitForBlankLineInsertion(currentGroup, nextChange) {
 }
 
 /**
- * Find the line number of the last actual change (ignoring unchanged lines).
+ * Find the line number of the last added or deleted line (excluding unchanged lines).
  * Used to detect gaps between changes for proper grouping.
  * @param {AnyLineChange[]} group - Group to search
- * @returns {number | null} Line number of last change, or null if no changes found
+ * @returns {number | null} Line number of last added or deleted line, or null if no such changes found
  */
 function getLastChangedLineNumber(group) {
   for (let j = group.length - 1; j >= 0; j--) {
