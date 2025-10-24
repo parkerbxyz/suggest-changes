@@ -294,8 +294,12 @@ export const generateSuggestionBody = (changes) => {
 
   // Detect line movement: deletion and addition of same content.
   // This happens when linters move lines to insert blank lines before them.
-  // Instead of creating complex multi-line suggestions (which cause GitHub API issues),
-  // we create a simple single-line suggestion to add the blank line.
+  //
+  // ISSUE: Multi-line suggestions cause problems with GitHub's batch application.
+  // When users accept multiple suggestions at once, GitHub can lose content.
+  //
+  // SOLUTION: For line movements, create a simple single-line suggestion to add a blank
+  // after the context line. This won't remove consecutive blanks, but it's safer for batching.
   if (deletedLines.length === 1 && addedLines.length === 1) {
     const deleted = deletedLines[0]
     const added = addedLines[0]
@@ -308,9 +312,8 @@ export const generateSuggestionBody = (changes) => {
       )
 
       if (unchangedBeforeDeletion) {
-        // Create a simple single-line suggestion to add a blank after the context line.
-        // Trade-off: This may result in an extra blank line if there are consecutive blanks,
-        // but it avoids GitHub API issues with multi-line suggestions and ensures safe batching.
+        // Create a simple single-line suggestion to add a blank after the context line
+        // This avoids multi-line suggestions that cause batching issues
         return {
           body: createSuggestion(unchangedBeforeDeletion.content + '\n'),
           lineCount: 1,
@@ -462,6 +465,7 @@ function buildCommentDraft(path, fromFileRange, group) {
     line: endLine,
     ...(lineCount > 1 && {
       start_line: startLine,
+      start_side: 'RIGHT',
     }),
   })
 }
