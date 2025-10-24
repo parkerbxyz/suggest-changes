@@ -3,6 +3,7 @@ Headings should be surrounded by blank lines.
 ## Example 2
 There should not be multiple consecutive blank lines.
 
+
 ```
 It even works with fenced code blocks!
 ```

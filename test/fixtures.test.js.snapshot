@@ -82,13 +82,8 @@ exports[`Integration Tests > Suggestion Generation > new-file-issue/default sugg
   },
   {
     "path": "test/fixtures/new-file-issue/before.md",
-    "body": "\`\`\`\`suggestion\\n\\n\\n\`\`\`\`",
-    "line": 5
-  },
-  {
-    "path": "test/fixtures/new-file-issue/before.md",
     "body": "\`\`\`\`suggestion\\n\`\`\`\\n\\n\`\`\`\`",
-    "line": 8
+    "line": 9
   }
 ]
 `;
