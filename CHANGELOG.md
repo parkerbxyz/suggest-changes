@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.0.2](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.1...v3.0.2) (2025-10-25)
+
+
+### Bug Fixes
+
+* add detailed debug output for skipped duplicate suggestions ([#124](https://github.com/parkerbxyz/suggest-changes/issues/124)) ([03a1bc5](https://github.com/parkerbxyz/suggest-changes/commit/03a1bc588d2ac946dd5889166b02a26ada538b39))
+* handle new files and correct line numbers in suggestions ([#115](https://github.com/parkerbxyz/suggest-changes/issues/115)) ([99cf32f](https://github.com/parkerbxyz/suggest-changes/commit/99cf32f4c82824dbd55623e39c838ccf2940b149))
+* Improve grouping algorithm to handle line movements correctly ([#121](https://github.com/parkerbxyz/suggest-changes/issues/121)) ([6dc4a99](https://github.com/parkerbxyz/suggest-changes/commit/6dc4a999a3d81e51eb5d4a102a6958f690eee054))
+
 ## [3.0.1](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.0...v3.0.1) (2025-10-19)
 
 
