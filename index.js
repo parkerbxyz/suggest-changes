@@ -3,7 +3,6 @@
 import { debug, getInput, info, setFailed, warning } from '@actions/core'
 import { getExecOutput } from '@actions/exec'
 import { Octokit } from '@octokit/action'
-import { RequestError } from '@octokit/request-error'
 
 import { readFileSync } from 'node:fs'
 import { env } from 'node:process'
@@ -92,20 +91,6 @@ function formatLineRange(startLine, line) {
   return typeof startLine === 'number' && startLine !== line
     ? `${startLine}-${line}`
     : String(line)
-}
-
-/**
- * Returns true for the known 422 "line must be part of the diff" validation failure.
- * Strictly requires an Octokit RequestError so unrelated errors are rethrown.
- * @param {unknown} err
- * @returns {err is RequestError}
- */
-function isLineOutsideDiffError(err) {
-  return (
-    err instanceof RequestError &&
-    err.status === 422 &&
-    /line must be part of the diff/i.test(String(err.message))
-  )
 }
 
 /**
@@ -777,27 +762,17 @@ export async function run({
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
-  try {
-    await octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number,
-      commit_id,
-      body,
-      event,
-      comments,
-    })
-    debug('Batch create succeeded.')
-    return { comments, reviewCreated: true }
-  } catch (err) {
-    if (isLineOutsideDiffError(err)) {
-      debug(
-        'Batch review creation failed (422: line must be part of the diff). Returning without review.'
-      )
-      return { comments: [], reviewCreated: false }
-    }
-    throw err
-  }
+  await octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number,
+    commit_id,
+    body,
+    event,
+    comments,
+  })
+  debug(`Review created successfully with ${comments.length} suggestion(s).`)
+  return { comments, reviewCreated: true }
 }
 
 // Main entrypoint (only when executed directly)
