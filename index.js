@@ -306,11 +306,8 @@ export const groupChangesForSuggestions = (changes) => {
  * @returns {boolean} True if context line comes before added lines
  */
 const getContextLineComesFirst = (unchangedLines, addedLines) => {
-  return (
-    unchangedLines.length > 0 &&
-    addedLines.length > 0 &&
-    unchangedLines[0].lineAfter < addedLines[0].lineAfter
-  )
+  if (unchangedLines.length === 0 || addedLines.length === 0) return false
+  return unchangedLines[0].lineAfter < addedLines[0].lineAfter
 }
 
 /**
