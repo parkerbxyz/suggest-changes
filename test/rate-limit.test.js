@@ -4,14 +4,37 @@ import { describe, test } from 'node:test'
 import { RequestError } from '@octokit/request-error'
 import { batchComments, createBatchReviewBody, run } from '../index.js'
 
+/**
+ * Helper function to create mock comments for testing
+ * @param {number} count - Number of comments to create
+ * @returns {Array<{path: string, line: number, body: string}>}
+ */
+function createMockComments(count) {
+  return Array.from({ length: count }, (_, i) => ({
+    path: `file${i}.md`,
+    line: i + 1,
+    body: `suggestion ${i}`,
+  }))
+}
+
+/**
+ * Helper function to create a mock diff string from comments
+ * @param {Array<{path: string, line: number}>} comments - Comments to generate diff for
+ * @returns {string} Mock git diff string
+ */
+function createMockDiff(comments) {
+  return comments
+    .map(
+      (c, i) =>
+        `diff --git a/${c.path} b/${c.path}\n--- a/${c.path}\n+++ b/${c.path}\n@@ -1,1 +1,1 @@\n-old line ${i}\n+new line ${i}`
+    )
+    .join('\n')
+}
+
 describe('Rate Limit Handling', () => {
   describe('batchComments', () => {
     test('should return single batch when comments <= 100', () => {
-      const comments = Array.from({ length: 50 }, (_, i) => ({
-        path: `file${i}.md`,
-        line: 1,
-        body: `suggestion ${i}`,
-      }))
+      const comments = createMockComments(50)
 
       const batches = batchComments(comments)
       assert.strictEqual(batches.length, 1)
@@ -19,11 +42,7 @@ describe('Rate Limit Handling', () => {
     })
 
     test('should split into multiple batches when comments > 100', () => {
-      const comments = Array.from({ length: 250 }, (_, i) => ({
-        path: `file${i}.md`,
-        line: 1,
-        body: `suggestion ${i}`,
-      }))
+      const comments = createMockComments(250)
 
       const batches = batchComments(comments)
       assert.strictEqual(batches.length, 3)
@@ -33,11 +52,7 @@ describe('Rate Limit Handling', () => {
     })
 
     test('should handle exactly 100 comments', () => {
-      const comments = Array.from({ length: 100 }, (_, i) => ({
-        path: `file${i}.md`,
-        line: 1,
-        body: `suggestion ${i}`,
-      }))
+      const comments = createMockComments(100)
 
       const batches = batchComments(comments)
       assert.strictEqual(batches.length, 1)
@@ -45,11 +60,7 @@ describe('Rate Limit Handling', () => {
     })
 
     test('should handle exactly 101 comments', () => {
-      const comments = Array.from({ length: 101 }, (_, i) => ({
-        path: `file${i}.md`,
-        line: 1,
-        body: `suggestion ${i}`,
-      }))
+      const comments = createMockComments(101)
 
       const batches = batchComments(comments)
       assert.strictEqual(batches.length, 2)
@@ -127,19 +138,8 @@ describe('Rate Limit Handling', () => {
 
   describe('run with batching', () => {
     test('should create multiple reviews for >100 comments', async () => {
-      const comments = Array.from({ length: 150 }, (_, i) => ({
-        path: `file${i}.md`,
-        line: i + 1,
-        body: `suggestion ${i}`,
-      }))
-
-      // Create a large diff that generates many comments
-      const diff = comments
-        .map(
-          (c, i) =>
-            `diff --git a/${c.path} b/${c.path}\n--- a/${c.path}\n+++ b/${c.path}\n@@ -1,1 +1,1 @@\n-old line ${i}\n+new line ${i}`
-        )
-        .join('\n')
+      const comments = createMockComments(150)
+      const diff = createMockDiff(comments)
 
       let reviewCount = 0
       const createdReviews = []
@@ -232,18 +232,8 @@ describe('Rate Limit Handling', () => {
     })
 
     test('should continue with next batch if one batch fails with 422 error', async () => {
-      const comments = Array.from({ length: 150 }, (_, i) => ({
-        path: `file${i}.md`,
-        line: i + 1,
-        body: `suggestion ${i}`,
-      }))
-
-      const diff = comments
-        .map(
-          (c, i) =>
-            `diff --git a/${c.path} b/${c.path}\n--- a/${c.path}\n+++ b/${c.path}\n@@ -1,1 +1,1 @@\n-old line ${i}\n+new line ${i}`
-        )
-        .join('\n')
+      const comments = createMockComments(150)
+      const diff = createMockDiff(comments)
 
       let reviewCount = 0
       const mockOctokit = {
@@ -296,6 +286,76 @@ describe('Rate Limit Handling', () => {
         true,
         'Should mark as created when at least one succeeds'
       )
+      // Only the second batch (50 comments) should be in the result
+      assert.strictEqual(
+        result.comments.length,
+        50,
+        'Should return only comments from successful batches'
+      )
+    })
+
+    test('should track successful comments from correct batches', async () => {
+      const comments = createMockComments(250)
+      const diff = createMockDiff(comments)
+
+      let reviewCount = 0
+      const mockOctokit = {
+        pulls: {
+          listReviewComments: async () => ({ data: [] }),
+          listFiles: async () => ({
+            data: comments.map((c) => ({ filename: c.path })),
+          }),
+          createReview: async (params) => {
+            reviewCount++
+            // Second batch (middle 100 comments) fails
+            if (reviewCount === 2) {
+              throw new RequestError(
+                'Validation Failed: line must be part of the diff',
+                422,
+                {
+                  response: {
+                    url: 'https://api.github.com/repos/test/test/pulls/1/reviews',
+                    status: 422,
+                    headers: {},
+                    data: {},
+                  },
+                  request: {
+                    method: 'POST',
+                    url: 'https://api.github.com/repos/test/test/pulls/1/reviews',
+                    headers: {},
+                  },
+                }
+              )
+            }
+            return { data: { id: reviewCount } }
+          },
+        },
+      }
+
+      const result = await run({
+        octokit: mockOctokit,
+        owner: 'test',
+        repo: 'test',
+        pull_number: 1,
+        commit_id: 'abc123',
+        diff,
+        event: 'COMMENT',
+        body: 'Review',
+      })
+
+      assert.strictEqual(reviewCount, 3, 'Should attempt all 3 batches')
+      assert.strictEqual(result.reviewCreated, true)
+      // First batch (100) + third batch (50) = 150 successful comments
+      assert.strictEqual(
+        result.comments.length,
+        150,
+        'Should return 150 comments from batches 1 and 3'
+      )
+      // Verify the comments are from the correct batches (first 100 and last 50)
+      assert.strictEqual(result.comments[0].path, 'file0.md')
+      assert.strictEqual(result.comments[99].path, 'file99.md')
+      assert.strictEqual(result.comments[100].path, 'file200.md')
+      assert.strictEqual(result.comments[149].path, 'file249.md')
     })
   })
 })

@@ -59817,7 +59817,7 @@ async function run({
   }
 
   let reviewCreated = false
-  let successfulComments = 0
+  const successfulComments = []
 
   for (let i = 0; i < batches.length; i++) {
     const batch = batches[i]
@@ -59843,7 +59843,7 @@ async function run({
         `Review ${batchNumber}/${totalBatches} created successfully with ${batch.length} comments`
       )
       reviewCreated = true
-      successfulComments += batch.length
+      successfulComments.push(...batch)
     } catch (err) {
       if (isLineOutsideDiffError(err)) {
         (0,core.warning)(
@@ -59870,14 +59870,14 @@ async function run({
     }
   }
 
-  if (reviewCreated && successfulComments < comments.length) {
+  if (reviewCreated && successfulComments.length < comments.length) {
     (0,core.warning)(
-      `Successfully posted ${successfulComments} of ${comments.length} suggestions`
+      `Successfully posted ${successfulComments.length} of ${comments.length} suggestions`
     )
   }
 
   return {
-    comments: reviewCreated ? comments.slice(0, successfulComments) : [],
+    comments: successfulComments,
     reviewCreated,
   }
 }
