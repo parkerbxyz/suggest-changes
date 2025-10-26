@@ -13,6 +13,9 @@ Add this step to your workflow after a step that modifies files:
 - uses: parkerbxyz/suggest-changes@v3
 ```
 
+> [!IMPORTANT]
+> This GitHub Action works on [`pull_request`](https://docs.github.com/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request) and [`pull_request_target`](https://docs.github.com/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target) events.
+
 ## Usage
 
 ### Basic example
@@ -38,9 +41,6 @@ jobs:
 
       - uses: parkerbxyz/suggest-changes@v3
 ```
-
-> [!IMPORTANT]
-> This GitHub Action works on [`pull_request`](https://docs.github.com/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request) and [`pull_request_target`](https://docs.github.com/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target) events.
 
 ### Complete example
 
