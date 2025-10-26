@@ -54783,7 +54783,9 @@ var __webpack_exports__ = {};
 
 // EXPORTS
 __nccwpck_require__.d(__webpack_exports__, {
+  VK: () => (/* binding */ batchComments),
   Qc: () => (/* binding */ calculateLinePosition),
+  XC: () => (/* binding */ createBatchReviewBody),
   H9: () => (/* binding */ createSuggestion),
   E_: () => (/* binding */ generateCommentKey),
   o5: () => (/* binding */ generateReviewComments),
@@ -59020,6 +59022,10 @@ function getFilePath(ctx, input, type) {
  * @property {number} lineCount
  */
 
+// GitHub's undocumented limit for comments per review
+// Set conservatively to avoid hitting the limit
+const MAX_COMMENTS_PER_REVIEW = 100
+
 /**
  * Type guard to check if a change is an AddedLine
  * @param {AnyLineChange} change - The change to check
@@ -59110,6 +59116,19 @@ function isLineOutsideDiffError(err) {
  */
 function formatError(err) {
   return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * Check if error is a rate limit error (429 or 403 with rate limit message)
+ * @param {unknown} err
+ * @returns {err is RequestError}
+ */
+function isRateLimitError(err) {
+  if (!(err instanceof RequestError)) return false
+  if (err.status === 429) return true
+  if (err.status === 403 && /rate limit/i.test(String(err.message)))
+    return true
+  return false
 }
 
 /**
@@ -59702,6 +59721,43 @@ async function filterSuggestionsInPullRequestDiff({
 }
 
 /**
+ * Split comments into batches to avoid exceeding GitHub's per-review limit
+ * @param {ReviewCommentDraft[]} comments - Comments to batch
+ * @param {number} batchSize - Maximum comments per batch
+ * @returns {ReviewCommentDraft[][]} Array of comment batches
+ */
+function batchComments(comments, batchSize = MAX_COMMENTS_PER_REVIEW) {
+  const batches = []
+  for (let i = 0; i < comments.length; i += batchSize) {
+    batches.push(comments.slice(i, i + batchSize))
+  }
+  return batches
+}
+
+/**
+ * Create review body with information about batching if needed
+ * @param {string} baseBody - Original review body
+ * @param {number} batchNumber - Current batch number (1-indexed)
+ * @param {number} totalBatches - Total number of batches
+ * @param {number} totalComments - Total number of comments across all batches
+ * @returns {string} Enhanced review body
+ */
+function createBatchReviewBody(
+  baseBody,
+  batchNumber,
+  totalBatches,
+  totalComments
+) {
+  if (totalBatches === 1) return baseBody
+
+  const batchInfo = `\n\n---\n\n**Note:** Due to GitHub's limit of ${MAX_COMMENTS_PER_REVIEW} comments per review, ` +
+    `${totalComments} suggestions have been split into ${totalBatches} separate reviews. ` +
+    `This is review ${batchNumber} of ${totalBatches}.`
+
+  return baseBody ? `${baseBody}${batchInfo}` : batchInfo.trim()
+}
+
+/**
  * Main execution function for the GitHub Action
  * @param {Object} options - Configuration options
  * @param {Octokit} options.octokit - Octokit instance
@@ -59749,26 +59805,80 @@ async function run({
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
-  try {
-    await octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number,
-      commit_id,
+
+  // Batch comments if we exceed the per-review limit
+  const batches = batchComments(comments)
+  const totalBatches = batches.length
+
+  if (totalBatches > 1) {
+    (0,core.info)(
+      `Splitting ${comments.length} suggestions into ${totalBatches} reviews (max ${MAX_COMMENTS_PER_REVIEW} per review)`
+    )
+  }
+
+  let reviewCreated = false
+  const successfulComments = []
+
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i]
+    const batchNumber = i + 1
+    const reviewBody = createBatchReviewBody(
       body,
-      event,
-      comments,
-    })
-    ;(0,core.debug)('Batch create succeeded.')
-    return { comments, reviewCreated: true }
-  } catch (err) {
-    if (isLineOutsideDiffError(err)) {
-      (0,core.debug)(
-        'Batch review creation failed (422: line must be part of the diff). Returning without review.'
+      batchNumber,
+      totalBatches,
+      comments.length
+    )
+
+    try {
+      await octokit.pulls.createReview({
+        owner,
+        repo,
+        pull_number,
+        commit_id,
+        body: reviewBody,
+        event,
+        comments: batch,
+      })
+      ;(0,core.debug)(
+        `Review ${batchNumber}/${totalBatches} created successfully with ${batch.length} comments`
       )
-      return { comments: [], reviewCreated: false }
+      reviewCreated = true
+      successfulComments.push(...batch)
+    } catch (err) {
+      if (isLineOutsideDiffError(err)) {
+        (0,core.warning)(
+          `Review ${batchNumber}/${totalBatches} failed: line must be part of the diff. Skipping this batch.`
+        )
+        continue
+      }
+      if (isRateLimitError(err)) {
+        (0,core.warning)(
+          `Review ${batchNumber}/${totalBatches} failed: GitHub API rate limit exceeded.`
+        )
+        if (err instanceof RequestError && err.response?.headers) {
+          const resetTime = err.response.headers['x-ratelimit-reset']
+          if (resetTime) {
+            const resetDate = new Date(Number(resetTime) * 1000)
+            ;(0,core.warning)(`Rate limit will reset at: ${resetDate.toISOString()}`)
+          }
+        }
+        // Stop processing further batches if we hit rate limit
+        break
+      }
+      // For other errors, rethrow
+      throw err
     }
-    throw err
+  }
+
+  if (reviewCreated && successfulComments.length < comments.length) {
+    (0,core.warning)(
+      `Successfully posted ${successfulComments.length} of ${comments.length} suggestions`
+    )
+  }
+
+  return {
+    comments: successfulComments,
+    reviewCreated,
   }
 }
 
@@ -59818,7 +59928,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   )
 }
 
+var __webpack_exports__batchComments = __webpack_exports__.VK;
 var __webpack_exports__calculateLinePosition = __webpack_exports__.Qc;
+var __webpack_exports__createBatchReviewBody = __webpack_exports__.XC;
 var __webpack_exports__createSuggestion = __webpack_exports__.H9;
 var __webpack_exports__generateCommentKey = __webpack_exports__.E_;
 var __webpack_exports__generateReviewComments = __webpack_exports__.o5;
@@ -59826,4 +59938,4 @@ var __webpack_exports__generateSuggestionBody = __webpack_exports__.MW;
 var __webpack_exports__getGitDiff = __webpack_exports__.Wz;
 var __webpack_exports__groupChangesForSuggestions = __webpack_exports__.jn;
 var __webpack_exports__run = __webpack_exports__.eF;
-export { __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__groupChangesForSuggestions as groupChangesForSuggestions, __webpack_exports__run as run };
+export { __webpack_exports__batchComments as batchComments, __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createBatchReviewBody as createBatchReviewBody, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__groupChangesForSuggestions as groupChangesForSuggestions, __webpack_exports__run as run };
