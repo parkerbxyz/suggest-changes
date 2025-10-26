@@ -116,7 +116,7 @@ The default `GITHUB_TOKEN` has read-only permissions for pull requests from fork
 
 ### Option 1: Use a GitHub App token (recommended)
 
-The `pull_request` event is recommended for most use cases. When triggered from a fork, you can use a [GitHub App token](https://docs.github.com/apps/creating-github-apps/authenticating-with-a-github-app/making-authenticated-api-requests-with-a-github-app-in-a-github-actions-workflow) instead of the default `GITHUB_TOKEN`:
+The `pull_request` event is recommended for most use cases. When triggered from a fork, the workflow runs in the fork's context, which is more secure than `pull_request_target`. You can use a [GitHub App token](https://docs.github.com/apps/creating-github-apps/authenticating-with-a-github-app/making-authenticated-api-requests-with-a-github-app-in-a-github-actions-workflow) to provide the necessary permissions:
 
 ```yaml
 on:
@@ -147,14 +147,12 @@ jobs:
           comment: 'Please commit the suggested changes.'
 ```
 
-**Why this is recommended:** The workflow runs in the context of the fork, preventing untrusted code from accessing secrets from the base repository.
-
 ### Option 2: Use `pull_request_target` event
 
 The `pull_request_target` event can be used to support pull requests from forks, as it grants the `GITHUB_TOKEN` write permissions even when triggered from a fork.
 
 > [!CAUTION]
-> When using `pull_request_target`, the workflow runs in the context of the base repository, not the fork. This means you should **not** check out, build, or run untrusted code from the pull request, as this could be a security risk. For more information, see GitHub's documentation on [Mitigating the risks of untrusted code checkout](https://docs.github.com/enterprise-cloud@latest/actions/reference/security/secure-use#mitigating-the-risks-of-untrusted-code-checkout).
+> When using `pull_request_target`, the workflow runs in the context of the base repository. Running untrusted code from a pull request in this context can lead to security vulnerabilities including repository compromise and secret exposure. For more information, see [`pull_request_target`](https://docs.github.com/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target) and [Mitigating the risks of untrusted code checkout](https://docs.github.com/enterprise-cloud@latest/actions/reference/security/secure-use#mitigating-the-risks-of-untrusted-code-checkout).
 
 ## Limitations
 
