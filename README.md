@@ -19,46 +19,6 @@ permissions:
   pull-requests: write
 ```
 
-### Working with pull requests from forks
-
-#### Using the `pull_request` event
-
-The `pull_request` event is recommended for most use cases. However, when triggered from a fork, the default `GITHUB_TOKEN` has read-only permissions and lacks the necessary write permissions to create pull request review comments.
-
-For pull requests from forks using the `pull_request` event, you can use a [GitHub App token](https://docs.github.com/apps/creating-github-apps/authenticating-with-a-github-app/making-authenticated-api-requests-with-a-github-app-in-a-github-actions-workflow) instead of the default `GITHUB_TOKEN`:
-
-```yaml
-on:
-  pull_request:
-
-jobs:
-  suggest-changes:
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-      - name: Generate token
-        id: generate-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-
-      - name: Suggest changes
-        uses: parkerbxyz/suggest-changes@v1
-        with:
-          token: ${{ steps.generate-token.outputs.token }}
-```
-
-This approach is more secure than `pull_request_target` because the workflow runs in the context of the fork. This prevents untrusted code from accessing secrets from the base repository and limits the potential impact of security issues.
-
-#### Using the `pull_request_target` event
-
-The `pull_request_target` event can be used to support pull requests from forks, as it grants the `GITHUB_TOKEN` write permissions even when triggered from a fork.
-
-> [!CAUTION]
-> When using `pull_request_target`, the workflow runs in the context of the base repository, not the fork. This means you should **not** check out, build, or run untrusted code from the pull request, as this could be a security risk. For more information, see GitHub's documentation on [Keeping your GitHub Actions and workflows secure](https://securitylab.github.com/research/github-actions-preventing-pwn-requests).
-
 ### Example
 
 You can use this action in an existing workflow and have it run after a linter or formatter step. For example, if you have a workflow that runs [markdownlint](https://github.com/DavidAnson/markdownlint) on all Markdown files in a pull request, you can use this action to suggest changes to the pull request after markdownlint has run.
@@ -108,6 +68,46 @@ Here is what an automated pull request review with suggested changes would look 
   <source media="(prefers-color-scheme: dark)" srcset="https://github.com/parkerbxyz/suggest-changes/assets/17183625/7657671b-35ba-4609-8031-8dc88a6e75e8">
   <img alt="A screenshot showing an automated pull request review with suggested changes" src="https://github.com/parkerbxyz/suggest-changes/assets/17183625/b59e0b60-162f-47ef-8c18-4e5ea11fb175">
 </picture>
+
+### Working with pull requests from forks
+
+#### Using the `pull_request` event
+
+The `pull_request` event is recommended for most use cases. However, when triggered from a fork, the default `GITHUB_TOKEN` has read-only permissions and lacks the necessary write permissions to create pull request review comments.
+
+For pull requests from forks using the `pull_request` event, you can use a [GitHub App token](https://docs.github.com/apps/creating-github-apps/authenticating-with-a-github-app/making-authenticated-api-requests-with-a-github-app-in-a-github-actions-workflow) instead of the default `GITHUB_TOKEN`:
+
+```yaml
+on:
+  pull_request:
+
+jobs:
+  suggest-changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Suggest changes
+        uses: parkerbxyz/suggest-changes@v1
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+```
+
+This approach is more secure than `pull_request_target` because the workflow runs in the context of the fork. This prevents untrusted code from accessing secrets from the base repository and limits the potential impact of security issues.
+
+#### Using the `pull_request_target` event
+
+The `pull_request_target` event can be used to support pull requests from forks, as it grants the `GITHUB_TOKEN` write permissions even when triggered from a fork.
+
+> [!CAUTION]
+> When using `pull_request_target`, the workflow runs in the context of the base repository, not the fork. This means you should **not** check out, build, or run untrusted code from the pull request, as this could be a security risk. For more information, see GitHub's documentation on [Keeping your GitHub Actions and workflows secure](https://securitylab.github.com/research/github-actions-preventing-pwn-requests).
 
 ## Limitations
 
