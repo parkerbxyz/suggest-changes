@@ -64,3 +64,5 @@ Limitations due to GitHub API and platform constraints:
 
 - Suggested changes can only be applied to [files](https://github.com/orgs/community/discussions/9099) and [lines](https://github.com/orgs/community/discussions/4452) that are part of the pull request diff.
 - Suggested changes are limited to [3000 files per pull request](https://docs.github.com/rest/pulls/pulls?apiVersion=2022-11-28#list-pull-requests-files).
+- GitHub limits each review to approximately 100 comments. If your changes generate more than 100 suggestions, this action will automatically split them into multiple separate reviews with informative messages explaining the batching.
+- GitHub enforces [API rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) (5,000 requests per hour for authenticated requests). If rate limits are exceeded, the action will log a warning with the reset time and stop processing further batches.
