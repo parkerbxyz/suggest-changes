@@ -63,6 +63,33 @@ exports[`Integration Tests > Suggestion Generation > markdownlint/default sugges
 ]
 `;
 
+exports[`Integration Tests > Suggestion Generation > new-file-issue/default suggestions should match snapshot 1`] = `
+[
+  {
+    "path": "test/fixtures/new-file-issue/before.md",
+    "body": "\`\`\`\`suggestion\\n## Example 1\\n\\n\`\`\`\`",
+    "line": 1
+  },
+  {
+    "path": "test/fixtures/new-file-issue/before.md",
+    "body": "\`\`\`\`suggestion\\nHeadings should be surrounded by blank lines.\\n\\n\`\`\`\`",
+    "line": 2
+  },
+  {
+    "path": "test/fixtures/new-file-issue/before.md",
+    "body": "\`\`\`\`suggestion\\n## Example 2\\n\\nThere should not be multiple consecutive blank lines.\\n\\n\`\`\`\`",
+    "line": 6,
+    "start_line": 3,
+    "start_side": "RIGHT"
+  },
+  {
+    "path": "test/fixtures/new-file-issue/before.md",
+    "body": "\`\`\`\`suggestion\\n\`\`\`\\n\\n\`\`\`\`",
+    "line": 9
+  }
+]
+`;
+
 exports[`Integration Tests > Suggestion Generation > php-cs-fixer/default suggestions should match snapshot 1`] = `
 [
   {
