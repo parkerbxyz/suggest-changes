@@ -74,7 +74,7 @@ export async function getGitDiff(gitArgs) {
  * @param {string} content
  * @returns {string}
  */
-export const createSuggestion = (content) => {
+export function createSuggestion(content) {
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
   // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
   return `\`\`\`\`suggestion\n${content}\n\`\`\`\``
@@ -223,7 +223,7 @@ function getLastChangedLineNumber(group) {
  * @param {AnyLineChange[]} changes - Array of line changes from git diff
  * @returns {AnyLineChange[][]} Array of suggestion groups
  */
-export const groupChangesForSuggestions = (changes) => {
+export function groupChangesForSuggestions(changes) {
   if (changes.length === 0) return []
 
   /** @type {AnyLineChange[][]} */
@@ -308,7 +308,7 @@ function getAnchorForAdditions(firstUnchangedLine, unchangedLines, addedLines) {
  * @param {AnyLineChange[]} changes - Group of related changes
  * @returns {SuggestionBody | null} Suggestion body and line count, or null if no suggestion needed
  */
-export const generateSuggestionBody = (changes) => {
+export function generateSuggestionBody(changes) {
   const { addedLines, deletedLines, unchangedLines } =
     filterChangesByType(changes)
 
@@ -403,11 +403,11 @@ export const generateSuggestionBody = (changes) => {
  * @param {{start: number}} fromFileRange - File range information
  * @returns {{startLine: number, endLine: number}} Line positioning
  */
-export const calculateLinePosition = (
+export function calculateLinePosition(
   groupChanges,
   lineCount,
   fromFileRange
-) => {
+) {
   const { addedLines, deletedLines, unchangedLines } =
     filterChangesByType(groupChanges)
 
@@ -543,7 +543,10 @@ export function generateReviewComments(
 
   // Log all generated suggestions with detailed debug info
   if (drafts.length) {
-    logComments('Generated suggestions:', drafts, { logger: debug, detailed: true })
+    logComments('Generated suggestions:', drafts, {
+      logger: debug,
+      detailed: true,
+    })
   } else {
     debug('Generated suggestions: 0')
   }
@@ -645,7 +648,11 @@ function isValidSuggestion(comment, anchors) {
  * @param {(message: string) => void} [options.logger] - Logger function to use (defaults to info)
  * @param {boolean} [options.detailed] - Whether to include full comment details
  */
-function logComments(header, comments, { logger = info, detailed = false } = {}) {
+function logComments(
+  header,
+  comments,
+  { logger = info, detailed = false } = {}
+) {
   if (!comments.length) return
 
   logger(`${header} ${comments.length}`)
