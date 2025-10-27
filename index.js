@@ -503,9 +503,9 @@ function buildCommentDraft(path, fromFileRange, group) {
 }
 
 /**
- * Partition an iterable into two arrays based on a predicate.
+ * Partition an array into two arrays based on a predicate.
  * @template T
- * @param {Iterable<T>} items
+ * @param {T[]} items
  * @param {(item: T) => boolean} predicate
  * @returns {{pass: T[], fail: T[]}}
  */
