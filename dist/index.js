@@ -59003,7 +59003,6 @@ function getFilePath(ctx, input, type) {
 
 
 
-
 /** @typedef {import('parse-git-diff').AnyLineChange} AnyLineChange */
 /** @typedef {import('parse-git-diff').AddedLine} AddedLine */
 /** @typedef {import('parse-git-diff').DeletedLine} DeletedLine */
@@ -59070,7 +59069,7 @@ async function getGitDiff(gitArgs) {
  * @param {string} content
  * @returns {string}
  */
-const createSuggestion = (content) => {
+function createSuggestion(content) {
   // Quadruple backticks allow for triple backticks in a fenced code block in the suggestion body
   // https://docs.github.com/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks#fenced-code-blocks
   return `\`\`\`\`suggestion\n${content}\n\`\`\`\``
@@ -59087,20 +59086,6 @@ function formatLineRange(startLine, line) {
   return typeof startLine === 'number' && startLine !== line
     ? `${startLine}-${line}`
     : String(line)
-}
-
-/**
- * Returns true for the known 422 "line must be part of the diff" validation failure.
- * Strictly requires an Octokit RequestError so unrelated errors are rethrown.
- * @param {unknown} err
- * @returns {err is RequestError}
- */
-function isLineOutsideDiffError(err) {
-  return (
-    err instanceof RequestError &&
-    err.status === 422 &&
-    /line must be part of the diff/i.test(String(err.message))
-  )
 }
 
 /**
@@ -59138,15 +59123,44 @@ function isUnchangedFollowedByAdded(group) {
 }
 
 /**
+ * Check if two changes represent a line movement (same content, different positions).
+ * @param {DeletedLine} deleted
+ * @param {AddedLine} added
+ * @returns {boolean}
+ */
+function isContentMovement(deleted, added) {
+  return deleted.content === added.content
+}
+
+/**
+ * Detect if changes contain a line movement pattern (deletion + addition of same content).
+ * Returns the deleted and added lines if a movement is detected, null otherwise.
+ * @param {AnyLineChange[]} changes
+ * @returns {{deleted: DeletedLine, added: AddedLine} | null}
+ */
+function detectLineMovement(changes) {
+  const { deletedLines, addedLines } = filterChangesByType(changes)
+
+  if (deletedLines.length === 1 && addedLines.length === 1) {
+    const deleted = deletedLines[0]
+    const added = addedLines[0]
+    if (isContentMovement(deleted, added)) {
+      return { deleted, added }
+    }
+  }
+
+  return null
+}
+
+/**
  * Detect if the group contains a line movement pattern where content is deleted
  * and re-added at a different location (typically to insert blank lines).
  * Pattern: [..., Deleted line, Unchanged line(s), upcoming Added line with same content]
  * @param {AnyLineChange[]} currentGroup - Current group being built
  * @param {AnyLineChange} nextChange - Next change to potentially add
- * @param {AnyLineChange[]} remainingChanges - All changes after nextChange
  * @returns {boolean} True if this appears to be a line movement
  */
-function isLineMovement(currentGroup, nextChange, remainingChanges) {
+function isLineMovement(currentGroup, nextChange) {
   // Check if nextChange is an added line
   if (!isAddedLine(nextChange)) return false
 
@@ -59156,7 +59170,7 @@ function isLineMovement(currentGroup, nextChange, remainingChanges) {
 
   // Check if the deleted and added lines have the same content
   // This indicates the line is being moved, not changed
-  return deletedLine.content === nextChange.content
+  return isContentMovement(deletedLine, nextChange)
 }
 
 /**
@@ -59204,7 +59218,7 @@ function getLastChangedLineNumber(group) {
  * @param {AnyLineChange[]} changes - Array of line changes from git diff
  * @returns {AnyLineChange[][]} Array of suggestion groups
  */
-const groupChangesForSuggestions = (changes) => {
+function groupChangesForSuggestions(changes) {
   if (changes.length === 0) return []
 
   /** @type {AnyLineChange[][]} */
@@ -59214,7 +59228,6 @@ const groupChangesForSuggestions = (changes) => {
 
   for (let i = 0; i < changes.length; i++) {
     const change = changes[i]
-    const remainingChanges = changes.slice(i + 1)
 
     // Check if we should split the group for blank line insertion pattern
     if (shouldSplitForBlankLineInsertion(currentGroup, change)) {
@@ -59238,11 +59251,7 @@ const groupChangesForSuggestions = (changes) => {
     const lastChangedLineNumber = getLastChangedLineNumber(currentGroup)
 
     // Check if this looks like a line movement before applying gap detection
-    const appearsToBeLineMovement = isLineMovement(
-      currentGroup,
-      change,
-      remainingChanges
-    )
+    const appearsToBeLineMovement = isLineMovement(currentGroup, change)
 
     // Start new group if there's a line gap between actual changes (not unchanged lines)
     // BUT: Don't split if this appears to be a line movement (delete + re-add same content)
@@ -59271,11 +59280,22 @@ const groupChangesForSuggestions = (changes) => {
  * @returns {boolean} True if context line comes before added lines
  */
 const getContextLineComesFirst = (unchangedLines, addedLines) => {
-  return (
-    unchangedLines.length > 0 &&
-    addedLines.length > 0 &&
-    unchangedLines[0].lineAfter < addedLines[0].lineAfter
-  )
+  if (unchangedLines.length === 0 || addedLines.length === 0) return false
+  return unchangedLines[0].lineAfter < addedLines[0].lineAfter
+}
+
+/**
+ * Determine the anchor line for pure additions with context.
+ * @param {UnchangedLine} firstUnchangedLine - First unchanged line in the group
+ * @param {UnchangedLine[]} unchangedLines - All unchanged lines in the group
+ * @param {AddedLine[]} addedLines - All added lines in the group
+ * @returns {number} The line number to anchor the suggestion to
+ */
+function getAnchorForAdditions(firstUnchangedLine, unchangedLines, addedLines) {
+  if (getContextLineComesFirst(unchangedLines, addedLines)) {
+    return firstUnchangedLine.lineBefore // Context comes first: anchor to it
+  }
+  return Math.max(1, firstUnchangedLine.lineBefore - 1) // Context comes after: anchor to line before it
 }
 
 /**
@@ -59283,7 +59303,7 @@ const getContextLineComesFirst = (unchangedLines, addedLines) => {
  * @param {AnyLineChange[]} changes - Group of related changes
  * @returns {SuggestionBody | null} Suggestion body and line count, or null if no suggestion needed
  */
-const generateSuggestionBody = (changes) => {
+function generateSuggestionBody(changes) {
   const { addedLines, deletedLines, unchangedLines } =
     filterChangesByType(changes)
 
@@ -59292,51 +59312,48 @@ const generateSuggestionBody = (changes) => {
   // Example: Line "foo" at position 5 is deleted and re-added at position 3.
   // Without this special handling, we'd suggest "replace 'foo' with 'foo'" (confusing no-op).
   // Instead, we suggest inserting a blank line before the moved content.
-  if (deletedLines.length === 1 && addedLines.length === 1) {
-    const deleted = deletedLines[0]
-    const added = addedLines[0]
+  const movement = detectLineMovement(changes)
+  if (movement) {
+    const { deleted } = movement
 
-    // If the deleted and added content is the same, this is a line movement
-    if (deleted.content === added.content) {
-      // Find the unchanged line before the deletion (context line)
-      const unchangedBeforeDeletion = unchangedLines.find(
-        (u) => u.lineBefore < deleted.lineBefore
+    // Find the unchanged line before the deletion (context line)
+    const unchangedBeforeDeletion = unchangedLines.find(
+      (u) => u.lineBefore < deleted.lineBefore
+    )
+
+    if (unchangedBeforeDeletion) {
+      // Count unchanged blank lines after the deleted line in the original file.
+      // When the line moves up, these blanks end up after it in the new position.
+      // To avoid consecutive blanks, we keep N-1 of them (removing one redundant blank).
+      const blanksAfterDeletion = unchangedLines.filter(
+        (u) => u.lineBefore > deleted.lineBefore && u.content === ''
       )
 
-      if (unchangedBeforeDeletion) {
-        // Count unchanged blank lines after the deleted line in the original file.
-        // When the line moves up, these blanks end up after it in the new position.
-        // To avoid consecutive blanks, we keep N-1 of them (removing one redundant blank).
-        const blanksAfterDeletion = unchangedLines.filter(
-          (u) => u.lineBefore > deleted.lineBefore && u.content === ''
-        )
+      // Build suggestion to show what the final state should be:
+      // 1. Context line (unchanged before deletion)
+      // 2. New blank line (being inserted)
+      // 3. Moved content line
+      // 4. Keep N-1 of the existing trailing blanks to maintain the same total number of blanks
+      //    (we're adding 1 new blank, so we keep N-1 existing ones to avoid increasing the total)
+      const suggestionLines = [
+        unchangedBeforeDeletion.content,
+        '',
+        deleted.content,
+      ]
 
-        // Build suggestion to show what the final state should be:
-        // 1. Context line (unchanged before deletion)
-        // 2. New blank line (being inserted)
-        // 3. Moved content line
-        // 4. Keep N-1 of the existing trailing blanks to maintain the same total number of blanks
-        //    (we're adding 1 new blank, so we keep N-1 existing ones to avoid increasing the total)
-        const suggestionLines = [
-          unchangedBeforeDeletion.content,
-          '',
-          deleted.content,
-        ]
+      // Keep only N-1 existing blanks by skipping the first (index 0) using slice(1)
+      // This maintains the same total blank line count after inserting the new blank
+      blanksAfterDeletion.slice(1).forEach(() => suggestionLines.push(''))
 
-        // Keep only N-1 existing blanks by skipping the first (index 0) using slice(1)
-        // This maintains the same total blank line count after inserting the new blank
-        blanksAfterDeletion.slice(1).forEach(() => suggestionLines.push(''))
+      // Calculate total lines being replaced in the suggestion:
+      // - 1 unchanged context line
+      // - 1 deleted/moved line
+      // - N trailing blank lines after deletion
+      const totalReplacedLines = 1 + 1 + blanksAfterDeletion.length
 
-        // Calculate total lines being replaced in the suggestion:
-        // - 1 unchanged context line
-        // - 1 deleted/moved line
-        // - N trailing blank lines after deletion
-        const totalReplacedLines = 1 + 1 + blanksAfterDeletion.length
-
-        return {
-          body: createSuggestion(suggestionLines.join('\n')),
-          lineCount: totalReplacedLines,
-        }
+      return {
+        body: createSuggestion(suggestionLines.join('\n')),
+        lineCount: totalReplacedLines,
       }
     }
   }
@@ -59381,11 +59398,11 @@ const generateSuggestionBody = (changes) => {
  * @param {{start: number}} fromFileRange - File range information
  * @returns {{startLine: number, endLine: number}} Line positioning
  */
-const calculateLinePosition = (
+function calculateLinePosition(
   groupChanges,
   lineCount,
   fromFileRange
-) => {
+) {
   const { addedLines, deletedLines, unchangedLines } =
     filterChangesByType(groupChanges)
 
@@ -59406,12 +59423,11 @@ const calculateLinePosition = (
 
   // Check for line movement: if we have deletion and addition of same content,
   // anchor to the unchanged line before the deletion
+  const movement = detectLineMovement(groupChanges)
   if (
-    deletedLines.length === 1 &&
-    addedLines.length === 1 &&
-    deletedLines[0].content === addedLines[0].content &&
+    movement &&
     firstUnchangedLine &&
-    firstUnchangedLine.lineBefore < deletedLines[0].lineBefore
+    firstUnchangedLine.lineBefore < movement.deleted.lineBefore
   ) {
     // Line movement: anchor to the unchanged line before the deletion
     const startLine = firstUnchangedLine.lineBefore
@@ -59422,10 +59438,7 @@ const calculateLinePosition = (
   const startLine =
     firstDeletedLine?.lineBefore ?? // Deletions: use original line
     (firstUnchangedLine && addedLines.length > 0
-      ? // Pure additions with context: check if context comes before or after additions
-        getContextLineComesFirst(unchangedLines, addedLines)
-        ? firstUnchangedLine.lineBefore // Context line comes first: anchor to it
-        : Math.max(1, firstUnchangedLine.lineBefore - 1) // Context line comes after: anchor to line before it
+      ? getAnchorForAdditions(firstUnchangedLine, unchangedLines, addedLines) // Pure additions with context
       : firstUnchangedLine?.lineBefore ?? fromFileRange.start) // Fallback to context line or file range
 
   return { startLine, endLine: startLine + lineCount - 1 }
@@ -59490,18 +59503,18 @@ function buildCommentDraft(path, fromFileRange, group) {
 }
 
 /**
- * Partition an iterable into two arrays based on a predicate.
+ * Partition an array into two arrays based on a predicate.
  * @template T
- * @param {Iterable<T>} items
+ * @param {T[]} items
  * @param {(item: T) => boolean} predicate
  * @returns {{pass: T[], fail: T[]}}
  */
 function partition(items, predicate) {
   /** @type {T[]} */ const pass = []
   /** @type {T[]} */ const fail = []
-  for (const item of items) {
+  items.forEach((item) => {
     ;(predicate(item) ? pass : fail).push(item)
-  }
+  })
   return { pass, fail }
 }
 
@@ -59522,21 +59535,23 @@ function generateReviewComments(
     const draft = buildCommentDraft(path, fromFileRange, group)
     if (draft) drafts.push(draft)
   }
-  
+
   // Log all generated suggestions with detailed debug info
   if (drafts.length) {
-    (0,core.debug)(`Generated suggestions: ${drafts.length}`)
-    logDetailedCommentDebugInfo(drafts)
+    logComments('Generated suggestions:', drafts, {
+      logger: core.debug,
+      detailed: true,
+    })
   } else {
     (0,core.debug)('Generated suggestions: 0')
   }
-  
+
   const { pass: unique, fail: skipped } = partition(
     drafts,
     (draft) => !existingCommentKeys.has(generateCommentKey(draft))
   )
   if (skipped.length) {
-    logCommentList(
+    logComments(
       'Suggestions skipped because they would duplicate existing suggestions:',
       skipped
     )
@@ -59621,42 +59636,44 @@ function isValidSuggestion(comment, anchors) {
 }
 
 /**
- * Log detailed debug output for review comment drafts.
- * @param {ReviewCommentDraft[]} comments
+ * Log review comment drafts with optional detailed output.
+ * @param {string} header - Header message to display
+ * @param {ReviewCommentDraft[]} comments - Comments to log
+ * @param {Object} [options] - Logging options
+ * @param {(message: string) => void} [options.logger] - Logger function to use (defaults to info)
+ * @param {boolean} [options.detailed] - Whether to include full comment details
  */
-function logDetailedCommentDebugInfo(comments) {
-  for (const comment of comments) {
-    (0,core.debug)(`- Draft review comment:`)
-    ;(0,core.debug)(`  path: ${comment.path}`)
-    ;(0,core.debug)(`  line: ${comment.line}`)
-    if (comment.start_line !== undefined) {
-      (0,core.debug)(`  start_line: ${comment.start_line}`)
-    }
-    if (comment.start_side !== undefined) {
-      (0,core.debug)(`  start_side: ${comment.start_side}`)
-    }
-    (0,core.debug)(`  body:`)
-    const indentedBody = comment.body
-      .split('\n')
-      .map((line) => `  ${line}`)
-      .join('\n')
-    ;(0,core.debug)(indentedBody)
-  }
-}
-
-/**
- * Log a list of review comment drafts with a standardized header.
- * @param {string} header
- * @param {ReviewCommentDraft[]} comments
- * @param {(message: string) => void} [logger]
- */
-function logCommentList(header, comments, logger = core.info) {
+function logComments(
+  header,
+  comments,
+  { logger = core.info, detailed = false } = {}
+) {
   if (!comments.length) return
+
   logger(`${header} ${comments.length}`)
+
   for (const comment of comments) {
-    logger(
-      `- ${comment.path}:${formatLineRange(comment.start_line, comment.line)}`
-    )
+    if (detailed) {
+      logger(`- Draft review comment:`)
+      logger(`  path: ${comment.path}`)
+      logger(`  line: ${comment.line}`)
+      if (comment.start_line !== undefined) {
+        logger(`  start_line: ${comment.start_line}`)
+      }
+      if (comment.start_side !== undefined) {
+        logger(`  start_side: ${comment.start_side}`)
+      }
+      logger(`  body:`)
+      const indentedBody = comment.body
+        .split('\n')
+        .map((line) => `  ${line}`)
+        .join('\n')
+      logger(indentedBody)
+    } else {
+      logger(
+        `- ${comment.path}:${formatLineRange(comment.start_line, comment.line)}`
+      )
+    }
   }
 }
 
@@ -59694,7 +59711,7 @@ async function filterSuggestionsInPullRequestDiff({
   const { pass: valid, fail: skipped } = partition(comments, (comment) =>
     isValidSuggestion(comment, rightSideAnchors)
   )
-  logCommentList(
+  logComments(
     'Suggestions skipped because they are outside the pull request diff:',
     skipped
   )
@@ -59745,31 +59762,21 @@ async function run({
     pull_number,
     comments: initialComments,
   })
-  logCommentList(`Suggestions to be included in review:`, comments)
+  logComments('Suggestions to be included in review:', comments)
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
-  try {
-    await octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number,
-      commit_id,
-      body,
-      event,
-      comments,
-    })
-    ;(0,core.debug)('Batch create succeeded.')
-    return { comments, reviewCreated: true }
-  } catch (err) {
-    if (isLineOutsideDiffError(err)) {
-      (0,core.debug)(
-        'Batch review creation failed (422: line must be part of the diff). Returning without review.'
-      )
-      return { comments: [], reviewCreated: false }
-    }
-    throw err
-  }
+  await octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number,
+    commit_id,
+    body,
+    event,
+    comments,
+  })
+  ;(0,core.info)(`Review created successfully with ${comments.length} suggestion(s).`)
+  return { comments, reviewCreated: true }
 }
 
 // Main entrypoint (only when executed directly)
