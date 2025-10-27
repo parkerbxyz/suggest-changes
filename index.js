@@ -163,10 +163,9 @@ function detectLineMovement(changes) {
  * Pattern: [..., Deleted line, Unchanged line(s), upcoming Added line with same content]
  * @param {AnyLineChange[]} currentGroup - Current group being built
  * @param {AnyLineChange} nextChange - Next change to potentially add
- * @param {AnyLineChange[]} remainingChanges - All changes after nextChange
  * @returns {boolean} True if this appears to be a line movement
  */
-function isLineMovement(currentGroup, nextChange, remainingChanges) {
+function isLineMovement(currentGroup, nextChange) {
   // Check if nextChange is an added line
   if (!isAddedLine(nextChange)) return false
 
@@ -234,7 +233,6 @@ export const groupChangesForSuggestions = (changes) => {
 
   for (let i = 0; i < changes.length; i++) {
     const change = changes[i]
-    const remainingChanges = changes.slice(i + 1)
 
     // Check if we should split the group for blank line insertion pattern
     if (shouldSplitForBlankLineInsertion(currentGroup, change)) {
@@ -258,11 +256,7 @@ export const groupChangesForSuggestions = (changes) => {
     const lastChangedLineNumber = getLastChangedLineNumber(currentGroup)
 
     // Check if this looks like a line movement before applying gap detection
-    const appearsToBeLineMovement = isLineMovement(
-      currentGroup,
-      change,
-      remainingChanges
-    )
+    const appearsToBeLineMovement = isLineMovement(currentGroup, change)
 
     // Start new group if there's a line gap between actual changes (not unchanged lines)
     // BUT: Don't split if this appears to be a line movement (delete + re-add same content)
