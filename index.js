@@ -538,8 +538,7 @@ export function generateReviewComments(
 
   // Log all generated suggestions with detailed debug info
   if (drafts.length) {
-    debug(`Generated suggestions: ${drafts.length}`)
-    logDetailedCommentDebugInfo(drafts)
+    logComments('Generated suggestions:', drafts, { logger: debug, detailed: true })
   } else {
     debug('Generated suggestions: 0')
   }
@@ -549,7 +548,7 @@ export function generateReviewComments(
     (draft) => !existingCommentKeys.has(generateCommentKey(draft))
   )
   if (skipped.length) {
-    logCommentList(
+    logComments(
       'Suggestions skipped because they would duplicate existing suggestions:',
       skipped
     )
@@ -634,42 +633,40 @@ function isValidSuggestion(comment, anchors) {
 }
 
 /**
- * Log detailed debug output for review comment drafts.
- * @param {ReviewCommentDraft[]} comments
+ * Log review comment drafts with optional detailed output.
+ * @param {string} header - Header message to display
+ * @param {ReviewCommentDraft[]} comments - Comments to log
+ * @param {Object} [options] - Logging options
+ * @param {(message: string) => void} [options.logger] - Logger function to use (defaults to info)
+ * @param {boolean} [options.detailed] - Whether to include full comment details
  */
-function logDetailedCommentDebugInfo(comments) {
-  for (const comment of comments) {
-    debug(`- Draft review comment:`)
-    debug(`  path: ${comment.path}`)
-    debug(`  line: ${comment.line}`)
-    if (comment.start_line !== undefined) {
-      debug(`  start_line: ${comment.start_line}`)
-    }
-    if (comment.start_side !== undefined) {
-      debug(`  start_side: ${comment.start_side}`)
-    }
-    debug(`  body:`)
-    const indentedBody = comment.body
-      .split('\n')
-      .map((line) => `  ${line}`)
-      .join('\n')
-    debug(indentedBody)
-  }
-}
-
-/**
- * Log a list of review comment drafts with a standardized header.
- * @param {string} header
- * @param {ReviewCommentDraft[]} comments
- * @param {(message: string) => void} [logger]
- */
-function logCommentList(header, comments, logger = info) {
+function logComments(header, comments, { logger = info, detailed = false } = {}) {
   if (!comments.length) return
+
   logger(`${header} ${comments.length}`)
+
   for (const comment of comments) {
-    logger(
-      `- ${comment.path}:${formatLineRange(comment.start_line, comment.line)}`
-    )
+    if (detailed) {
+      logger(`- Draft review comment:`)
+      logger(`  path: ${comment.path}`)
+      logger(`  line: ${comment.line}`)
+      if (comment.start_line !== undefined) {
+        logger(`  start_line: ${comment.start_line}`)
+      }
+      if (comment.start_side !== undefined) {
+        logger(`  start_side: ${comment.start_side}`)
+      }
+      logger(`  body:`)
+      const indentedBody = comment.body
+        .split('\n')
+        .map((line) => `  ${line}`)
+        .join('\n')
+      logger(indentedBody)
+    } else {
+      logger(
+        `- ${comment.path}:${formatLineRange(comment.start_line, comment.line)}`
+      )
+    }
   }
 }
 
@@ -707,7 +704,7 @@ async function filterSuggestionsInPullRequestDiff({
   const { pass: valid, fail: skipped } = partition(comments, (comment) =>
     isValidSuggestion(comment, rightSideAnchors)
   )
-  logCommentList(
+  logComments(
     'Suggestions skipped because they are outside the pull request diff:',
     skipped
   )
@@ -758,7 +755,7 @@ export async function run({
     pull_number,
     comments: initialComments,
   })
-  logCommentList(`Suggestions to be included in review:`, comments)
+  logComments('Suggestions to be included in review:', comments)
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
