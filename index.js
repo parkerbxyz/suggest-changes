@@ -517,9 +517,9 @@ function buildCommentDraft(path, fromFileRange, group) {
 function partition(items, predicate) {
   /** @type {T[]} */ const pass = []
   /** @type {T[]} */ const fail = []
-  for (const item of items) {
+  items.forEach((item) => {
     ;(predicate(item) ? pass : fail).push(item)
-  }
+  })
   return { pass, fail }
 }
 
@@ -780,7 +780,7 @@ export async function run({
     event,
     comments,
   })
-  debug(`Review created successfully with ${comments.length} suggestion(s).`)
+  info(`Review created successfully with ${comments.length} suggestion(s).`)
   return { comments, reviewCreated: true }
 }
 
