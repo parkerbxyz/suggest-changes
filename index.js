@@ -290,6 +290,20 @@ const getContextLineComesFirst = (unchangedLines, addedLines) => {
 }
 
 /**
+ * Determine the anchor line for pure additions with context.
+ * @param {UnchangedLine} firstUnchangedLine - First unchanged line in the group
+ * @param {UnchangedLine[]} unchangedLines - All unchanged lines in the group
+ * @param {AddedLine[]} addedLines - All added lines in the group
+ * @returns {number} The line number to anchor the suggestion to
+ */
+function getAnchorForAdditions(firstUnchangedLine, unchangedLines, addedLines) {
+  if (getContextLineComesFirst(unchangedLines, addedLines)) {
+    return firstUnchangedLine.lineBefore // Context comes first: anchor to it
+  }
+  return Math.max(1, firstUnchangedLine.lineBefore - 1) // Context comes after: anchor to line before it
+}
+
+/**
  * Generate suggestion body and line count for a group of changes
  * @param {AnyLineChange[]} changes - Group of related changes
  * @returns {SuggestionBody | null} Suggestion body and line count, or null if no suggestion needed
@@ -429,10 +443,7 @@ export const calculateLinePosition = (
   const startLine =
     firstDeletedLine?.lineBefore ?? // Deletions: use original line
     (firstUnchangedLine && addedLines.length > 0
-      ? // Pure additions with context: check if context comes before or after additions
-        getContextLineComesFirst(unchangedLines, addedLines)
-        ? firstUnchangedLine.lineBefore // Context line comes first: anchor to it
-        : Math.max(1, firstUnchangedLine.lineBefore - 1) // Context line comes after: anchor to line before it
+      ? getAnchorForAdditions(firstUnchangedLine, unchangedLines, addedLines) // Pure additions with context
       : firstUnchangedLine?.lineBefore ?? fromFileRange.start) // Fallback to context line or file range
 
   return { startLine, endLine: startLine + lineCount - 1 }
