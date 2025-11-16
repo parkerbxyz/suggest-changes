@@ -752,7 +752,7 @@ async function main() {
   const repoParts = String(env.GITHUB_REPOSITORY).split('/')
   const owner = repoParts[0]
   const repo = repoParts[1]
-  
+
   if (!owner || !repo) {
     throw new Error('GITHUB_REPOSITORY must be in format owner/repo')
   }
