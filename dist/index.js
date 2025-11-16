@@ -59062,8 +59062,10 @@ const filterChangesByType = (changes) => ({
  * This pattern indicates blank line insertions after content lines.
  */
 function isUnchangedFollowedByAdded(group) {
+    const first = group[0];
     return (group.length > 0 &&
-        isUnchangedLine(group[0]) &&
+        first !== undefined &&
+        isUnchangedLine(first) &&
         group.slice(1).every(isAddedLine));
 }
 /**
@@ -59081,7 +59083,7 @@ function detectLineMovement(changes) {
     if (deletedLines.length === 1 && addedLines.length === 1) {
         const deleted = deletedLines[0];
         const added = addedLines[0];
-        if (isContentMovement(deleted, added)) {
+        if (deleted && added && isContentMovement(deleted, added)) {
             return { deleted, added };
         }
     }
@@ -59147,6 +59149,8 @@ function groupChangesForSuggestions(changes) {
     let currentGroup = [];
     for (let i = 0; i < changes.length; i++) {
         const change = changes[i];
+        if (!change)
+            continue;
         // Check if we should split the group for blank line insertion pattern
         if (shouldSplitForBlankLineInsertion(currentGroup, change)) {
             groups.push(currentGroup);
@@ -59186,9 +59190,11 @@ function groupChangesForSuggestions(changes) {
  * Helper function to determine if context line comes before added lines.
  */
 const getContextLineComesFirst = (unchangedLines, addedLines) => {
-    if (unchangedLines.length === 0 || addedLines.length === 0)
+    const firstUnchanged = unchangedLines[0];
+    const firstAdded = addedLines[0];
+    if (!firstUnchanged || !firstAdded)
         return false;
-    return unchangedLines[0].lineAfter < addedLines[0].lineAfter;
+    return firstUnchanged.lineAfter < firstAdded.lineAfter;
 };
 /**
  * Determine the anchor line for pure additions with context.
@@ -59255,8 +59261,9 @@ function generateSuggestionBody(changes) {
     const { deletedLines } = filterChangesByType(changes);
     if (deletedLines.length === 0) {
         const contextLineComesFirst = getContextLineComesFirst(unchangedLines, addedLines);
-        const suggestionLines = contextLineComesFirst
-            ? [unchangedLines[0].content, ...addedLines.map((line) => line.content)]
+        const firstUnchanged = unchangedLines[0];
+        const suggestionLines = contextLineComesFirst && firstUnchanged
+            ? [firstUnchanged.content, ...addedLines.map((line) => line.content)]
             : addedLines.map((line) => line.content);
         // lineCount represents the number of existing (anchor) lines being replaced,
         // not the number of lines in the suggestion body (which can include context plus additions).
@@ -59529,7 +59536,12 @@ async function main() {
     const octokit = new dist_bundle_Octokit({
         userAgent: 'suggest-changes',
     });
-    const [owner, repo] = String(external_node_process_namespaceObject.env.GITHUB_REPOSITORY).split('/');
+    const repoParts = String(external_node_process_namespaceObject.env.GITHUB_REPOSITORY).split('/');
+    const owner = repoParts[0];
+    const repo = repoParts[1];
+    if (!owner || !repo) {
+        throw new Error('GITHUB_REPOSITORY must be in format owner/repo');
+    }
     const eventPayload = JSON.parse((0,external_node_fs_namespaceObject.readFileSync)(String(external_node_process_namespaceObject.env.GITHUB_EVENT_PATH), 'utf8'));
     if (!eventPayload?.pull_request) {
         const eventName = String(external_node_process_namespaceObject.env.GITHUB_EVENT_NAME);
