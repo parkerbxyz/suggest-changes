@@ -1,24 +1,24 @@
 # Testing
 
-This directory contains tests for the suggest-changes action using Node.js built-in `node:test` module.
+This directory contains tests for the suggest-changes action using Node.js built-in `node:test` module with TypeScript via `tsx`.
 
 ## Test files
 
-### `unit.test.js`
+### `unit.test.ts`
 
 - **Purpose**: Unit testing for the main `run` function with mocked dependencies
 - **Approach**: Tests the complete workflow with controlled inputs and mocked Octokit
 - **Test Cases**: Empty diffs, comment generation, duplicate detection
 - **Dependencies**: Uses simplified mocks to isolate the core logic
 
-### `fixtures.test.js`
+### `fixtures.test.ts`
 
 - **Purpose**: Fixture-based testing for suggestion generation and application using real before/after file pairs
 - **Approach**: Uses native Node.js snapshot capabilities to verify suggestion comments generated from actual fixtures
 - **Test Cases**:
   - **Suggestion Generation**: Full end-to-end testing of diff generation and suggestion creation with snapshot comparison
   - **Suggestion Application**: Verifies that applying generated suggestions to the "before" state produces the "after" state, ensuring suggestions are correct and will work when applied in a PR
-- **Dependencies**: Imports real functions from `index.js` and uses shared `getGitDiff` utility
+- **Dependencies**: Imports real functions from `lib/index.js` (compiled from TypeScript) and uses shared `getGitDiff` utility
 
 The Suggestion Application tests simulate what happens when a user applies suggestions in a GitHub PR review. They:
 

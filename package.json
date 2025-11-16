@@ -5,11 +5,11 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "ncc build",
-    "test": "node --test",
-    "test:coverage": "node --test --experimental-test-coverage",
-    "test:watch": "node --test --watch",
-    "test:update-snapshots": "node --test --test-update-snapshots"
+    "build": "ncc build src/index.ts",
+    "test": "tsx --test test/*.test.ts",
+    "test:coverage": "tsx --test --experimental-test-coverage test/*.test.ts",
+    "test:watch": "tsx --test --watch test/*.test.ts",
+    "test:update-snapshots": "tsx --test --test-update-snapshots test/*.test.ts"
   },
   "dependencies": {
     "@actions/core": "^1.11.1",
@@ -20,7 +20,9 @@
   "devDependencies": {
     "@octokit/webhooks-types": "^7.6.1",
     "@types/node": "^24.9.2",
-    "@vercel/ncc": "^0.38.4"
+    "@vercel/ncc": "^0.38.4",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
   },
   "engines": {
     "node": ">=24.5.0"

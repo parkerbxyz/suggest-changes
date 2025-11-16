@@ -1,7 +1,6 @@
-// @ts-check
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
-import { generateSuggestionBody, groupChangesForSuggestions } from '../index.js'
+import { generateSuggestionBody, groupChangesForSuggestions } from '../src/index.ts'
 
 // Tests for the grouping algorithm fix for blank line insertions
 // When linters add blank lines, we need to group them properly to create clear suggestions

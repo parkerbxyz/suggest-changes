@@ -1,13 +1,12 @@
-// @ts-check
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import parseGitDiff from 'parse-git-diff'
 import {
-  createSuggestion,
-  generateCommentKey,
-  generateReviewComments,
-  run,
-} from '../index.js'
+    createSuggestion,
+    generateCommentKey,
+    generateReviewComments,
+    run,
+} from '../src/index.ts'
 
 describe('Unit Tests', () => {
   describe('generateCommentKey', () => {
