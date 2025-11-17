@@ -18,7 +18,7 @@ This directory contains tests for the suggest-changes action using Node.js built
 - **Test Cases**:
   - **Suggestion Generation**: Full end-to-end testing of diff generation and suggestion creation with snapshot comparison
   - **Suggestion Application**: Verifies that applying generated suggestions to the "before" state produces the "after" state, ensuring suggestions are correct and will work when applied in a PR
-- **Dependencies**: Imports real functions from `lib/index.js` (compiled from TypeScript) and uses shared `getGitDiff` utility
+- **Dependencies**: Imports real functions directly from `src/index.ts` (using `tsx` to run TypeScript) and uses shared `getGitDiff` utility
 
 The Suggestion Application tests simulate what happens when a user applies suggestions in a GitHub PR review. They:
 
