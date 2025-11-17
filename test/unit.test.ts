@@ -107,7 +107,7 @@ describe('Unit Tests', () => {
       }
 
       const result = await run({
-        // @ts-ignore - Test mock doesn't need full Octokit interface
+        // @ts-expect-error - Test mock doesn't need full Octokit interface
         octokit: mockOctokit,
         owner: 'test-owner',
         repo: 'test-repo',
@@ -140,7 +140,7 @@ describe('Unit Tests', () => {
       }
 
       const result = await run({
-        // @ts-ignore - Test mock doesn't need full Octokit interface
+        // @ts-expect-error - Test mock doesn't need full Octokit interface
         octokit: mockOctokit,
         owner: 'test-owner',
         repo: 'test-repo',
@@ -167,7 +167,7 @@ describe('Unit Tests', () => {
 
       for (const event of validEvents) {
         const result = await run({
-          // @ts-ignore - Test mock doesn't need full Octokit interface
+          // @ts-expect-error - Test mock doesn't need full Octokit interface
           octokit: mockOctokit,
           owner: 'test-owner',
           repo: 'test-repo',
