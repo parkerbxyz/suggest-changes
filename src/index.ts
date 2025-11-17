@@ -17,6 +17,7 @@ import type {
   LogOptions,
   PartitionResult,
   PullRequestEvent,
+  PullRequestFile,
   ReviewCommentDraft,
   ReviewCommentInput,
   ReviewEvent,
@@ -177,7 +178,7 @@ function shouldSplitForBlankLineInsertion(
  * Used to detect gaps between changes for proper grouping.
  */
 function getLastChangedLineNumber(group: AnyLineChange[]): number | null {
-  const lastChange = group.findLast((c: AnyLineChange) => isDeletedLine(c) || isAddedLine(c))
+  const lastChange = group.findLast((c) => isDeletedLine(c) || isAddedLine(c))
   if (!lastChange) return null
   return isDeletedLine(lastChange)
     ? lastChange.lineBefore
@@ -289,7 +290,7 @@ function getAnchorForAdditions(
 export function generateSuggestionBody(
   changes: AnyLineChange[]
 ): SuggestionBody | null {
-  const { addedLines, unchangedLines } =
+  const { addedLines, deletedLines, unchangedLines } =
     filterChangesByType(changes)
 
   // Detect line movement: deletion and addition of same content.
@@ -345,13 +346,11 @@ export function generateSuggestionBody(
 
   // No additions means no content to suggest, except for pure deletions (empty replacement block)
   if (addedLines.length === 0) {
-    const { deletedLines } = filterChangesByType(changes)
     if (deletedLines.length === 0) return null
     return { body: createSuggestion(''), lineCount: deletedLines.length }
   }
 
   // Pure additions: include context if available
-  const { deletedLines } = filterChangesByType(changes)
   if (deletedLines.length === 0) {
     const contextLineComesFirst = getContextLineComesFirst(
       unchangedLines,
@@ -549,18 +548,19 @@ async function fetchCanonicalDiff(
 ): Promise<string | null> {
   if (
     !octokit.pulls ||
-    typeof (octokit as any).pulls.get !== 'function'
+    typeof (octokit as { pulls?: { get?: unknown } }).pulls?.get !== 'function'
   ) {
     debug('PR diff filter: pulls.get unavailable; skipping.')
     return null
   }
   try {
-    const { data } = await (octokit as any).pulls.get({
+    // When using application/vnd.github.v3.diff, the response data is a string, not the normal PR object
+    const { data } = (await octokit.pulls.get({
       owner,
       repo,
       pull_number,
       headers: { accept: 'application/vnd.github.v3.diff' },
-    })
+    })) as unknown as { data: string }
     if (typeof data !== 'string' || !/^diff --git /.test(data)) {
       debug('PR diff filter: no usable diff string; skipping.')
       return null
@@ -777,7 +777,7 @@ async function main() {
 
   const pullRequestFiles = (
     await octokit.pulls.listFiles({ owner, repo, pull_number })
-  ).data.map((file: any) => file.filename)
+  ).data.map((file: PullRequestFile) => file.filename)
 
   // Get the diff between the head branch and the base branch (limit to the files in the pull request)
   const diff = await getGitDiff(['--', ...pullRequestFiles])

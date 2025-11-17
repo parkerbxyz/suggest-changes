@@ -59209,7 +59209,7 @@ function getAnchorForAdditions(firstUnchangedLine, unchangedLines, addedLines) {
  * Generate suggestion body and line count for a group of changes
  */
 function generateSuggestionBody(changes) {
-    const { addedLines, unchangedLines } = filterChangesByType(changes);
+    const { addedLines, deletedLines, unchangedLines } = filterChangesByType(changes);
     // Detect line movement: deletion and addition of same content.
     // This happens when linters move lines to insert blank lines before them.
     // Example: Line "foo" at position 5 is deleted and re-added at position 3.
@@ -59252,13 +59252,11 @@ function generateSuggestionBody(changes) {
     }
     // No additions means no content to suggest, except for pure deletions (empty replacement block)
     if (addedLines.length === 0) {
-        const { deletedLines } = filterChangesByType(changes);
         if (deletedLines.length === 0)
             return null;
         return { body: createSuggestion(''), lineCount: deletedLines.length };
     }
     // Pure additions: include context if available
-    const { deletedLines } = filterChangesByType(changes);
     if (deletedLines.length === 0) {
         const contextLineComesFirst = getContextLineComesFirst(unchangedLines, addedLines);
         const firstUnchanged = unchangedLines[0];
@@ -59396,17 +59394,18 @@ function generateReviewComments(parsedDiff, existingCommentKeys = new Set()) {
  */
 async function fetchCanonicalDiff(octokit, owner, repo, pull_number) {
     if (!octokit.pulls ||
-        typeof octokit.pulls.get !== 'function') {
+        typeof octokit.pulls?.get !== 'function') {
         (0,core.debug)('PR diff filter: pulls.get unavailable; skipping.');
         return null;
     }
     try {
-        const { data } = await octokit.pulls.get({
+        // When using application/vnd.github.v3.diff, the response data is a string, not the normal PR object
+        const { data } = (await octokit.pulls.get({
             owner,
             repo,
             pull_number,
             headers: { accept: 'application/vnd.github.v3.diff' },
-        });
+        }));
         if (typeof data !== 'string' || !/^diff --git /.test(data)) {
             (0,core.debug)('PR diff filter: no usable diff string; skipping.');
             return null;

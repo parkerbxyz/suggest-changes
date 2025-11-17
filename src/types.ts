@@ -19,6 +19,9 @@ export type ReviewCommentInput = NonNullable<
   Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['comments']
 >[number]
 
+export type PullRequestFile =
+  Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/files']['response']['data'][number]
+
 export type ReviewEvent = NonNullable<
   Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']
 >
