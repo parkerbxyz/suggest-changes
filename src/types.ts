@@ -1,3 +1,4 @@
+import type { Octokit } from '@octokit/action'
 import type { Endpoints } from '@octokit/types'
 import type { PullRequestEvent } from '@octokit/webhooks-types'
 import type {
@@ -57,7 +58,7 @@ export interface FilteredChanges {
 
 // Action run configuration
 export interface RunConfig {
-  octokit: any // Using any to avoid importing full Octokit type
+  octokit: Octokit
   owner: string
   repo: string
   pull_number: number
