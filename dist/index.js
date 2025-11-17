@@ -59555,7 +59555,13 @@ async function main() {
     const pullRequestFiles = (await octokit.pulls.listFiles({ owner, repo, pull_number })).data.map((file) => file.filename);
     // Get the diff between the head branch and the base branch (limit to the files in the pull request)
     const diff = await getGitDiff(['--', ...pullRequestFiles]);
-    const event = ((0,core.getInput)('event') || 'COMMENT').toUpperCase();
+    // Validate and parse the event input
+    const eventInput = ((0,core.getInput)('event') || 'COMMENT').toUpperCase();
+    const validEvents = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'];
+    if (!validEvents.includes(eventInput)) {
+        throw new Error(`Invalid event type: "${eventInput}". Must be one of: ${validEvents.join(', ')}`);
+    }
+    const event = eventInput;
     const body = (0,core.getInput)('comment') || '';
     await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body });
 }

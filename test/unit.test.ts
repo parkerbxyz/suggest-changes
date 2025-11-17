@@ -2,10 +2,10 @@ import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import parseGitDiff from 'parse-git-diff'
 import {
-    createSuggestion,
-    generateCommentKey,
-    generateReviewComments,
-    run,
+  createSuggestion,
+  generateCommentKey,
+  generateReviewComments,
+  run,
 } from '../src/index.ts'
 
 describe('Unit Tests', () => {
@@ -153,6 +153,36 @@ describe('Unit Tests', () => {
 
       assert.strictEqual(result.reviewCreated, true)
       assert.strictEqual(result.comments.length, 1)
+    })
+
+    test('should accept valid event types', async () => {
+      const mockOctokit = {
+        pulls: {
+          listReviewComments: async () => ({ data: [] }),
+          createReview: async () => ({ data: { id: 123 } }),
+        },
+      }
+
+      const validEvents = ['COMMENT', 'APPROVE', 'REQUEST_CHANGES'] as const
+
+      for (const event of validEvents) {
+        const result = await run({
+          // @ts-ignore - Test mock doesn't need full Octokit interface
+          octokit: mockOctokit,
+          owner: 'test-owner',
+          repo: 'test-repo',
+          pull_number: 1,
+          commit_id: 'abc123',
+          diff: 'diff --git a/test.md b/test.md\n--- a/test.md\n+++ b/test.md\n@@ -1,1 +1,1 @@\n-old\n+new',
+          event,
+          body: '',
+        })
+
+        assert.ok(
+          result.reviewCreated || result.comments.length === 0,
+          `Should accept valid event type: ${event}`
+        )
+      }
     })
   })
 

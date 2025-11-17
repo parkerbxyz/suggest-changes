@@ -782,7 +782,15 @@ async function main() {
   // Get the diff between the head branch and the base branch (limit to the files in the pull request)
   const diff = await getGitDiff(['--', ...pullRequestFiles])
 
-  const event = (getInput('event') || 'COMMENT').toUpperCase() as ReviewEvent
+  // Validate and parse the event input
+  const eventInput = (getInput('event') || 'COMMENT').toUpperCase()
+  const validEvents = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'] as const
+  if (!validEvents.includes(eventInput as any)) {
+    throw new Error(
+      `Invalid event type: "${eventInput}". Must be one of: ${validEvents.join(', ')}`
+    )
+  }
+  const event = eventInput as ReviewEvent
   const body = getInput('comment') || ''
 
   await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body })
