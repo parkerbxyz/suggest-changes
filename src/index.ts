@@ -784,8 +784,8 @@ async function main() {
 
   // Validate and parse the event input
   const eventInput = (getInput('event') || 'COMMENT').toUpperCase()
-  const validEvents = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'] as const
-  if (!validEvents.includes(eventInput as any)) {
+  const validEvents: ReadonlyArray<ReviewEvent> = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT']
+  if (!validEvents.includes(eventInput as ReviewEvent)) {
     throw new Error(
       `Invalid event type: "${eventInput}". Must be one of: ${validEvents.join(', ')}`
     )
