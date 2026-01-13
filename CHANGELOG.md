@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.0.3](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.2...v3.0.3) (2026-01-13)
+
+
+### Bug Fixes
+
+* **deps:** bump @actions/core from 1.11.1 to 2.0.1 ([#132](https://github.com/parkerbxyz/suggest-changes/issues/132)) ([d12137a](https://github.com/parkerbxyz/suggest-changes/commit/d12137a270686599aa72d5fbe2885ddf2deab87d))
+* **deps:** bump @actions/exec from 1.1.1 to 2.0.0 ([#131](https://github.com/parkerbxyz/suggest-changes/issues/131)) ([5d62b1a](https://github.com/parkerbxyz/suggest-changes/commit/5d62b1a4aab4e6363574cc6bc06cf1170fc9928a))
+* **deps:** bump @octokit/action from 8.0.2 to 8.0.4 ([#133](https://github.com/parkerbxyz/suggest-changes/issues/133)) ([17da405](https://github.com/parkerbxyz/suggest-changes/commit/17da405677fb024c2ed3b902b1ea597167aa69f2))
+
 ## [3.0.2](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.1...v3.0.2) (2025-10-25)
 
 
