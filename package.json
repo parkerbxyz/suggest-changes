@@ -12,7 +12,7 @@
     "test:update-snapshots": "tsx --test --test-update-snapshots test/*.test.ts"
   },
   "dependencies": {
-    "@actions/core": "^2.0.2",
+    "@actions/core": "^3.0.0",
     "@actions/exec": "^3.0.0",
     "@octokit/action": "^8.0.4",
     "parse-git-diff": "^0.0.19"
