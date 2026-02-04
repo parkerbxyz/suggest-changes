@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.0.4](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.3...v3.0.4) (2026-02-04)
+
+
+### Bug Fixes
+
+* **deps:** bump @actions/core from 2.0.2 to 3.0.0 ([#138](https://github.com/parkerbxyz/suggest-changes/issues/138)) ([187bab0](https://github.com/parkerbxyz/suggest-changes/commit/187bab0d212609c5e57f55f63ba4a52d1e867743))
+* **deps:** bump @actions/exec from 2.0.0 to 3.0.0 ([#137](https://github.com/parkerbxyz/suggest-changes/issues/137)) ([2b2677f](https://github.com/parkerbxyz/suggest-changes/commit/2b2677f506d2c73bb407cf38b101501ac94b242c))
+* **deps:** bump undici and @actions/http-client ([#139](https://github.com/parkerbxyz/suggest-changes/issues/139)) ([27babf8](https://github.com/parkerbxyz/suggest-changes/commit/27babf8b13f7f37d7767213327ec13160afb2499))
+
 ## [3.0.3](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.2...v3.0.3) (2026-01-13)
 
 
