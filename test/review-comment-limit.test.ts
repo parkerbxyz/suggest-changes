@@ -125,91 +125,29 @@ describe('review comment limit', () => {
     assert.strictEqual(result.comments[49].path, 'file149.md')
   })
 
-  test('returns no posted comments on 403 secondary rate limit', async () => {
-    const error = Object.assign(
-      new Error(
-        'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.'
-      ),
-      { status: 403, response: { headers: {} } }
+  test('propagates rate-limit errors so the top-level handler can format them', async () => {
+    const error = Object.assign(new Error('API rate limit exceeded'), {
+      status: 429,
+      response: { headers: {} },
+    })
+
+    await assert.rejects(
+      run({
+        octokit: createMockOctokit({
+          listReviewComments: async () => {
+            throw error
+          },
+        }),
+        owner: 'test',
+        repo: 'test',
+        pull_number: 1,
+        commit_id: 'abc123',
+        diff: createMockDiff(createMockFiles(1)),
+        event: 'COMMENT',
+        body: 'Review',
+      }),
+      error
     )
-
-    const result = await run({
-      octokit: createMockOctokit({
-        createReview: async () => {
-          throw error
-        },
-      }),
-      owner: 'test',
-      repo: 'test',
-      pull_number: 1,
-      commit_id: 'abc123',
-      diff: createMockDiff(createMockFiles(1)),
-      event: 'COMMENT',
-      body: 'Review',
-    })
-
-    assert.strictEqual(result.reviewCreated, false)
-    assert.strictEqual(result.comments.length, 0)
-  })
-
-  test('returns no posted comments when listing existing comments hits a rate limit', async () => {
-    const error = Object.assign(new Error('API rate limit exceeded'), {
-      status: 429,
-      response: { headers: {} },
-    })
-
-    const result = await run({
-      octokit: createMockOctokit({
-        listReviewComments: async () => {
-          throw error
-        },
-      }),
-      owner: 'test',
-      repo: 'test',
-      pull_number: 1,
-      commit_id: 'abc123',
-      diff: createMockDiff(createMockFiles(1)),
-      event: 'COMMENT',
-      body: 'Review',
-    })
-
-    assert.strictEqual(result.reviewCreated, false)
-    assert.strictEqual(result.comments.length, 0)
-  })
-
-  test('returns no posted comments when fetching the canonical diff hits a rate limit', async () => {
-    const error = Object.assign(new Error('API rate limit exceeded'), {
-      status: 429,
-      response: { headers: {} },
-    })
-
-    const octokit = createMockOctokit() as unknown as {
-      paginate: (fn: unknown) => Promise<unknown>
-      pulls: {
-        listReviewComments: () => Promise<unknown>
-        createReview: (params: ReviewParams) => Promise<unknown>
-        get: () => Promise<unknown>
-      }
-    }
-    // Simulate a rate-limit error raised by the canonical-diff fetch (octokit.pulls.get)
-    // inside filterSuggestionsInPullRequestDiff.
-    octokit.pulls.get = async () => {
-      throw error
-    }
-
-    const result = await run({
-      octokit,
-      owner: 'test',
-      repo: 'test',
-      pull_number: 1,
-      commit_id: 'abc123',
-      diff: createMockDiff(createMockFiles(1)),
-      event: 'COMMENT',
-      body: 'Review',
-    })
-
-    assert.strictEqual(result.reviewCreated, false)
-    assert.strictEqual(result.comments.length, 0)
   })
 
   test('dedupes duplicate suggestions generated within a single run', async () => {

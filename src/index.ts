@@ -791,22 +791,10 @@ export async function run({
 }: RunConfig): Promise<RunResult> {
   debug(`Diff output: ${diff}`)
 
-  let existingComments: GetReviewComment[]
-  try {
-    existingComments = await octokit.paginate(
-      octokit.pulls.listReviewComments,
-      { owner, repo, pull_number, per_page: 100 }
-    )
-  } catch (err) {
-    if (isRateLimitError(err)) {
-      warning(
-        'Could not list existing review comments: GitHub API rate limit exceeded.'
-      )
-      warnRateLimitReset(err)
-      return { comments: [], reviewCreated: false }
-    }
-    throw err
-  }
+  const existingComments: GetReviewComment[] = await octokit.paginate(
+    octokit.pulls.listReviewComments,
+    { owner, repo, pull_number, per_page: 100 }
+  )
   const existingCommentKeys = new Set<string>(
     existingComments.map(generateCommentKey)
   )
@@ -818,25 +806,13 @@ export async function run({
     parsedDiff,
     existingCommentKeys
   )
-  let comments: ReviewCommentDraft[]
-  try {
-    comments = await filterSuggestionsInPullRequestDiff({
-      octokit,
-      owner,
-      repo,
-      pull_number,
-      comments: initialComments,
-    })
-  } catch (err) {
-    if (isRateLimitError(err)) {
-      warning(
-        'Could not fetch the pull request diff: GitHub API rate limit exceeded.'
-      )
-      warnRateLimitReset(err)
-      return { comments: [], reviewCreated: false }
-    }
-    throw err
-  }
+  const comments = await filterSuggestionsInPullRequestDiff({
+    octokit,
+    owner,
+    repo,
+    pull_number,
+    comments: initialComments,
+  })
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
@@ -850,28 +826,19 @@ export async function run({
     comments.length
   )
 
-  try {
-    await octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number,
-      commit_id,
-      body: reviewBody,
-      event,
-      comments: reviewComments,
-    })
-    info(
-      `Review created successfully with ${reviewComments.length} suggestion(s).`
-    )
-    return { comments: reviewComments, reviewCreated: true }
-  } catch (err) {
-    if (isRateLimitError(err)) {
-      warning('Review creation failed: GitHub API rate limit exceeded.')
-      warnRateLimitReset(err)
-      return { comments: [], reviewCreated: false }
-    }
-    throw err
-  }
+  await octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number,
+    commit_id,
+    body: reviewBody,
+    event,
+    comments: reviewComments,
+  })
+  info(
+    `Review created successfully with ${reviewComments.length} suggestion(s).`
+  )
+  return { comments: reviewComments, reviewCreated: true }
 }
 
 // Main entrypoint (only when executed directly)
@@ -906,21 +873,9 @@ async function main() {
   const pull_number = Number(eventPayload.pull_request.number)
   const commit_id = eventPayload.pull_request.head.sha
 
-  let pullRequestFiles: string[]
-  try {
-    pullRequestFiles = (
-      await octokit.pulls.listFiles({ owner, repo, pull_number })
-    ).data.map((file: PullRequestFile) => file.filename)
-  } catch (err) {
-    if (isRateLimitError(err)) {
-      warning(
-        'Could not list pull request files: GitHub API rate limit exceeded.'
-      )
-      warnRateLimitReset(err)
-      return
-    }
-    throw err
-  }
+  const pullRequestFiles = (
+    await octokit.pulls.listFiles({ owner, repo, pull_number })
+  ).data.map((file: PullRequestFile) => file.filename)
 
   // Get the diff between the head branch and the base branch (limit to the files in the pull request)
   const diff = await getGitDiff(['--', ...pullRequestFiles])
@@ -940,7 +895,12 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) =>
+  main().catch((err) => {
+    if (isRateLimitError(err)) {
+      warning(`GitHub API rate limit exceeded: ${err.message}`)
+      warnRateLimitReset(err)
+      return
+    }
     setFailed(err instanceof Error ? err.message : String(err))
-  )
+  })
 }
