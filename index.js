@@ -25,8 +25,8 @@ import parseGitDiff from 'parse-git-diff'
  * @property {number} lineCount
  */
 
-// GitHub's undocumented limit for comments per review
-// Set conservatively to avoid hitting the limit
+// GitHub's undocumented limit for comments per review.
+// Suggestions beyond this limit are left for future workflow runs.
 const MAX_COMMENTS_PER_REVIEW = 100
 
 /**
@@ -724,40 +724,46 @@ async function filterSuggestionsInPullRequestDiff({
 }
 
 /**
- * Split comments into batches to avoid exceeding GitHub's per-review limit
- * @param {ReviewCommentDraft[]} comments - Comments to batch
- * @param {number} batchSize - Maximum comments per batch
- * @returns {ReviewCommentDraft[][]} Array of comment batches
+ * Limit comments to the maximum GitHub accepts in one review.
+ * @param {ReviewCommentDraft[]} comments - Comments to limit
+ * @param {number} maxComments - Maximum comments to include
+ * @returns {{comments: ReviewCommentDraft[], omittedCount: number}} Limited comments and omitted count
  */
-export function batchComments(comments, batchSize = MAX_COMMENTS_PER_REVIEW) {
-  const batches = []
-  for (let i = 0; i < comments.length; i += batchSize) {
-    batches.push(comments.slice(i, i + batchSize))
+export function limitCommentsForReview(
+  comments,
+  maxComments = MAX_COMMENTS_PER_REVIEW
+) {
+  const limitedComments = comments.slice(0, maxComments)
+  return {
+    comments: limitedComments,
+    omittedCount: comments.length - limitedComments.length,
   }
-  return batches
 }
 
 /**
- * Create review body with information about batching if needed
+ * Create review body with information about omitted suggestions if needed.
  * @param {string} baseBody - Original review body
- * @param {number} batchNumber - Current batch number (1-indexed)
- * @param {number} totalBatches - Total number of batches
- * @param {number} totalComments - Total number of comments across all batches
+ * @param {number} postedComments - Number of comments included in this review
+ * @param {number} totalComments - Total number of comments available for this run
  * @returns {string} Enhanced review body
  */
-export function createBatchReviewBody(
+export function createLimitedReviewBody(
   baseBody,
-  batchNumber,
-  totalBatches,
+  postedComments,
   totalComments
 ) {
-  if (totalBatches === 1) return baseBody
+  if (totalComments <= postedComments) return baseBody
 
-  const batchInfo = `\n\n---\n\n**Note:** Due to GitHub's limit of ${MAX_COMMENTS_PER_REVIEW} comments per review, ` +
-    `${totalComments} suggestions have been split into ${totalBatches} separate reviews. ` +
-    `This is review ${batchNumber} of ${totalBatches}.`
+  const omittedCount = totalComments - postedComments
+  const omittedText =
+    omittedCount === 1
+      ? '1 additional suggestion remains'
+      : `${omittedCount} additional suggestions remain`
+  const limitInfo =
+    `\n\n---\n\n**Note:** Posted ${postedComments} of ${totalComments} suggestions. ` +
+    `${omittedText} and may be posted on future workflow runs after these are addressed or if the workflow is rerun.`
 
-  return baseBody ? `${baseBody}${batchInfo}` : batchInfo.trim()
+  return baseBody ? `${baseBody}${limitInfo}` : limitInfo.trim()
 }
 
 /**
@@ -804,84 +810,56 @@ export async function run({
     pull_number,
     comments: initialComments,
   })
-  logCommentList(`Suggestions to be included in review:`, comments)
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
 
-  // Batch comments if we exceed the per-review limit
-  const batches = batchComments(comments)
-  const totalBatches = batches.length
-
-  if (totalBatches > 1) {
+  const { comments: reviewComments, omittedCount } =
+    limitCommentsForReview(comments)
+  logCommentList(`Suggestions to be included in review:`, reviewComments)
+  if (omittedCount > 0) {
     info(
-      `Splitting ${comments.length} suggestions into ${totalBatches} reviews (max ${MAX_COMMENTS_PER_REVIEW} per review)`
+      `Posting ${reviewComments.length} of ${comments.length} suggestions. ${omittedCount} additional suggestions remain for future workflow runs.`
     )
   }
 
-  let reviewCreated = false
-  const successfulComments = []
+  const reviewBody = createLimitedReviewBody(
+    body,
+    reviewComments.length,
+    comments.length
+  )
 
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i]
-    const batchNumber = i + 1
-    const reviewBody = createBatchReviewBody(
-      body,
-      batchNumber,
-      totalBatches,
-      comments.length
-    )
-
-    try {
-      await octokit.pulls.createReview({
-        owner,
-        repo,
-        pull_number,
-        commit_id,
-        body: reviewBody,
-        event,
-        comments: batch,
-      })
+  try {
+    await octokit.pulls.createReview({
+      owner,
+      repo,
+      pull_number,
+      commit_id,
+      body: reviewBody,
+      event,
+      comments: reviewComments,
+    })
+    debug(`Review created successfully with ${reviewComments.length} comments`)
+    return { comments: reviewComments, reviewCreated: true }
+  } catch (err) {
+    if (isLineOutsideDiffError(err)) {
       debug(
-        `Review ${batchNumber}/${totalBatches} created successfully with ${batch.length} comments`
+        'Review creation failed (422: line must be part of the diff). Returning without review.'
       )
-      reviewCreated = true
-      successfulComments.push(...batch)
-    } catch (err) {
-      if (isLineOutsideDiffError(err)) {
-        warning(
-          `Review ${batchNumber}/${totalBatches} failed: line must be part of the diff. Skipping this batch.`
-        )
-        continue
-      }
-      if (isRateLimitError(err)) {
-        warning(
-          `Review ${batchNumber}/${totalBatches} failed: GitHub API rate limit exceeded.`
-        )
-        if (err instanceof RequestError && err.response?.headers) {
-          const resetTime = err.response.headers['x-ratelimit-reset']
-          if (resetTime) {
-            const resetDate = new Date(Number(resetTime) * 1000)
-            warning(`Rate limit will reset at: ${resetDate.toISOString()}`)
-          }
-        }
-        // Stop processing further batches if we hit rate limit
-        break
-      }
-      // For other errors, rethrow
-      throw err
+      return { comments: [], reviewCreated: false }
     }
-  }
-
-  if (reviewCreated && successfulComments.length < comments.length) {
-    warning(
-      `Successfully posted ${successfulComments.length} of ${comments.length} suggestions`
-    )
-  }
-
-  return {
-    comments: successfulComments,
-    reviewCreated,
+    if (isRateLimitError(err)) {
+      warning('Review creation failed: GitHub API rate limit exceeded.')
+      if (err instanceof RequestError && err.response?.headers) {
+        const resetTime = err.response.headers['x-ratelimit-reset']
+        if (resetTime) {
+          const resetDate = new Date(Number(resetTime) * 1000)
+          warning(`Rate limit will reset at: ${resetDate.toISOString()}`)
+        }
+      }
+      return { comments: [], reviewCreated: false }
+    }
+    throw err
   }
 }
 
