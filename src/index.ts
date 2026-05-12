@@ -585,12 +585,17 @@ export function generateReviewComments(
   }
 
   const seenKeys = new Set<string>()
-  const { pass: unique, fail: skipped } = partition(drafts, (draft) => {
+  const unique: ReviewCommentDraft[] = []
+  const skipped: ReviewCommentDraft[] = []
+  for (const draft of drafts) {
     const key = generateCommentKey(draft)
-    if (existingCommentKeys.has(key) || seenKeys.has(key)) return false
+    if (existingCommentKeys.has(key) || seenKeys.has(key)) {
+      skipped.push(draft)
+      continue
+    }
     seenKeys.add(key)
-    return true
-  })
+    unique.push(draft)
+  }
   if (skipped.length) {
     logComments(
       'Suggestions skipped because they would duplicate existing suggestions:',
@@ -630,6 +635,7 @@ async function fetchCanonicalDiff(
     }
     return data
   } catch (err) {
+    if (isRateLimitError(err)) throw err
     debug(`PR diff fetch failed: ${formatError(err)}`)
     return null
   }
@@ -793,7 +799,7 @@ export function createReviewBodyWithLimitNotice(
       : `${omittedCount} additional suggestions remain`
   const limitInfo =
     `\n\n---\n\n**Note:** Posted ${postedComments} of ${totalComments} suggestions. ` +
-    `${omittedText} and may be posted on future workflow runs after these are addressed or if the workflow is rerun.`
+    `${omittedText}. Rerun the workflow (or push a new commit) to post the next batch.`
 
   return baseBody ? `${baseBody}${limitInfo}` : limitInfo.trim()
 }
@@ -840,13 +846,25 @@ export async function run({
     parsedDiff,
     existingCommentKeys
   )
-  const comments = await filterSuggestionsInPullRequestDiff({
-    octokit,
-    owner,
-    repo,
-    pull_number,
-    comments: initialComments,
-  })
+  let comments: ReviewCommentDraft[]
+  try {
+    comments = await filterSuggestionsInPullRequestDiff({
+      octokit,
+      owner,
+      repo,
+      pull_number,
+      comments: initialComments,
+    })
+  } catch (err) {
+    if (isRateLimitError(err)) {
+      warning(
+        'Could not fetch the pull request diff: GitHub API rate limit exceeded.'
+      )
+      warnRateLimitReset(err)
+      return { comments: [], reviewCreated: false }
+    }
+    throw err
+  }
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
