@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/parkerbxyz/suggest-changes/compare/v3.1.0...v3.1.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* order batched review suggestions ([#149](https://github.com/parkerbxyz/suggest-changes/issues/149)) ([c5c2196](https://github.com/parkerbxyz/suggest-changes/commit/c5c2196ac965fdfe2eeb31bc11d88cca06f3ba3a))
+
 ## [3.1.0](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.4...v3.1.0) (2026-05-12)
 
 
