@@ -27,6 +27,10 @@ import type {
   UnchangedLine,
 } from './types'
 
+// GitHub's undocumented limit for comments per review.
+// Suggestions beyond this limit are left for future workflow runs.
+const MAX_COMMENTS_PER_REVIEW = 100
+
 /**
  * Type guard to check if a change is an AddedLine
  */
@@ -88,6 +92,51 @@ function formatLineRange(startLine: number | undefined, line: number): string {
  */
 function formatError(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * Error shape returned by Octokit for failed REST requests.
+ */
+interface RequestErrorLike extends Error {
+  status: number
+  response?: {
+    headers?: Record<string, string | number | undefined>
+  }
+}
+
+/**
+ * Check if error has Octokit's REST request error shape.
+ */
+function isRequestErrorLike(err: unknown): err is RequestErrorLike {
+  return (
+    err instanceof Error &&
+    typeof (err as Partial<RequestErrorLike>).status === 'number'
+  )
+}
+
+/**
+ * Check if error is an API rate limit error (429 or 403 with rate limit message).
+ */
+function isRateLimitError(err: unknown): err is RequestErrorLike {
+  if (!isRequestErrorLike(err)) return false
+  if (err.status === 429) return true
+  if (err.status === 403 && /rate limit/i.test(String(err.message)))
+    return true
+  return false
+}
+
+/**
+ * Log rate limit reset timing when GitHub provides it.
+ */
+function warnRateLimitReset(err: RequestErrorLike): void {
+  const resetTime = err.response?.headers?.['x-ratelimit-reset']
+  if (resetTime === undefined) return
+
+  const resetTimestamp = Number(resetTime)
+  if (Number.isFinite(resetTimestamp)) {
+    const resetDate = new Date(resetTimestamp * 1000)
+    warning(`Rate limit will reset at: ${resetDate.toISOString()}`)
+  }
 }
 
 /**
@@ -524,10 +573,13 @@ export function generateReviewComments(
     debug('Generated suggestions: 0')
   }
 
-  const { pass: unique, fail: skipped } = partition(
-    drafts,
-    (draft) => !existingCommentKeys.has(generateCommentKey(draft))
-  )
+  const seenKeys = new Set<string>()
+  const { pass: unique, fail: skipped } = partition(drafts, (draft) => {
+    const key = generateCommentKey(draft)
+    if (existingCommentKeys.has(key) || seenKeys.has(key)) return false
+    seenKeys.add(key)
+    return true
+  })
   if (skipped.length) {
     logComments(
       'Suggestions skipped because they would duplicate existing suggestions:',
@@ -567,6 +619,7 @@ async function fetchCanonicalDiff(
     }
     return data
   } catch (err) {
+    if (isRateLimitError(err)) throw err
     debug(`PR diff fetch failed: ${formatError(err)}`)
     return null
   }
@@ -653,9 +706,14 @@ function logComments(
 }
 
 /**
- * Filters suggestion comments using the canonical server-side PR diff.
+ * Filter the supplied draft comments to those whose lines are part of the canonical
+ * pull request diff (per GitHub's API).
+ *
  * Returns a new array containing only valid suggestions and logs summary info.
- * Gracefully falls back (returns original comments) if the diff cannot be fetched/parsed.
+ * Falls back to the original comments when the diff cannot be fetched/parsed for
+ * benign reasons (e.g. unsupported endpoint, malformed response, parse error).
+ * Rate-limit errors propagate so the caller can stop processing instead of
+ * posting suggestions that may be outside the diff.
  */
 async function filterSuggestionsInPullRequestDiff({
   octokit,
@@ -693,6 +751,28 @@ async function filterSuggestionsInPullRequestDiff({
 }
 
 /**
+ * Create review body with information about omitted suggestions if needed.
+ */
+function createReviewBodyWithLimitNotice(
+  baseBody: string,
+  postedComments: number,
+  totalComments: number
+): string {
+  if (totalComments <= postedComments) return baseBody
+
+  const omittedCount = totalComments - postedComments
+  const omittedText =
+    omittedCount === 1
+      ? '1 additional suggestion remains'
+      : `${omittedCount} additional suggestions remain`
+  const limitInfo =
+    `\n\n> [!NOTE]\n> Posted ${postedComments} of ${totalComments} suggestions. ` +
+    `${omittedText}. Rerun the workflow (or push a new commit) to post the next batch.`
+
+  return baseBody ? `${baseBody}${limitInfo}` : limitInfo.trim()
+}
+
+/**
  * Main execution function for the GitHub Action
  */
 export async function run({
@@ -707,10 +787,13 @@ export async function run({
 }: RunConfig): Promise<RunResult> {
   debug(`Diff output: ${diff}`)
 
-  const existingComments = (
-    await octokit.pulls.listReviewComments({ owner, repo, pull_number })
-  ).data
-  const existingCommentKeys = new Set<string>(existingComments.map(generateCommentKey))
+  const existingComments: GetReviewComment[] = await octokit.paginate(
+    octokit.pulls.listReviewComments,
+    { owner, repo, pull_number, per_page: 100 }
+  )
+  const existingCommentKeys = new Set<string>(
+    existingComments.map(generateCommentKey)
+  )
 
   // Parse diff after collecting existing comment keys
   const parsedDiff = parseGitDiff(diff)
@@ -726,21 +809,32 @@ export async function run({
     pull_number,
     comments: initialComments,
   })
-  logComments('Suggestions to be included in review:', comments)
   if (!comments.length) {
     return { comments: [], reviewCreated: false }
   }
+
+  const reviewComments = comments.slice(0, MAX_COMMENTS_PER_REVIEW)
+  logComments('Suggestions to be included in review:', reviewComments)
+
+  const reviewBody = createReviewBodyWithLimitNotice(
+    body,
+    reviewComments.length,
+    comments.length
+  )
+
   await octokit.pulls.createReview({
     owner,
     repo,
     pull_number,
     commit_id,
-    body,
+    body: reviewBody,
     event,
-    comments,
+    comments: reviewComments,
   })
-  info(`Review created successfully with ${comments.length} suggestion(s).`)
-  return { comments, reviewCreated: true }
+  info(
+    `Review created successfully with ${reviewComments.length} suggestion(s).`
+  )
+  return { comments: reviewComments, reviewCreated: true }
 }
 
 // Main entrypoint (only when executed directly)
@@ -797,7 +891,12 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) =>
+  main().catch((err) => {
+    if (isRateLimitError(err)) {
+      warning(`GitHub API rate limit exceeded: ${err.message}`)
+      warnRateLimitReset(err)
+      return
+    }
     setFailed(err instanceof Error ? err.message : String(err))
-  )
+  })
 }

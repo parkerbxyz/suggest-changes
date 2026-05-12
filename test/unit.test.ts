@@ -101,6 +101,7 @@ describe('Unit Tests', () => {
   describe('run', () => {
     test('should return no comments for empty diff', async () => {
       const mockOctokit = {
+        paginate: async () => [],
         pulls: {
           listReviewComments: async () => ({ data: [] }),
         },
@@ -133,6 +134,7 @@ describe('Unit Tests', () => {
 +new line`
 
       const mockOctokit = {
+        paginate: async () => [],
         pulls: {
           listReviewComments: async () => ({ data: [] }),
           createReview: async () => ({ data: { id: 123 } }),
@@ -157,6 +159,7 @@ describe('Unit Tests', () => {
 
     test('should accept valid event types', async () => {
       const mockOctokit = {
+        paginate: async () => [],
         pulls: {
           listReviewComments: async () => ({ data: [] }),
           createReview: async () => ({ data: { id: 123 } }),
