@@ -3,7 +3,11 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import parseGitDiff from 'parse-git-diff'
-import { generateReviewComments, getGitDiff } from '../src/index.ts'
+import {
+  generateReviewComments,
+  getGitDiff,
+  sortCommentsForBatch,
+} from '../src/index.ts'
 
 const fixtureDir = 'test/fixtures'
 
@@ -30,7 +34,7 @@ async function generateDiff(beforeFile, afterFile) {
 /**
  * Apply a suggestion to file content
  * @param {string} content - The original file content
- * @param {import('../index.js').ReviewCommentDraft} suggestion - The suggestion to apply
+ * @param {import('../src/types').ReviewCommentDraft} suggestion - The suggestion to apply
  * @returns {string} The content with the suggestion applied
  */
 function applySuggestion(content, suggestion) {
@@ -71,7 +75,7 @@ function applySuggestion(content, suggestion) {
  * Apply multiple suggestions to file content in the correct order
  * Suggestions must be applied in reverse order (bottom to top) to avoid line number shifts
  * @param {string} content - The original file content
- * @param {Array<import('../index.js').ReviewCommentDraft>} suggestions - The suggestions to apply
+ * @param {Array<import('../src/types').ReviewCommentDraft>} suggestions - The suggestions to apply
  * @returns {string} The content with all suggestions applied
  */
 function applySuggestions(content, suggestions) {
@@ -85,6 +89,20 @@ function applySuggestions(content, suggestions) {
 
   let result = content
   for (const suggestion of sortedSuggestions) {
+    result = applySuggestion(result, suggestion)
+  }
+  return result
+}
+
+/**
+ * Apply multiple suggestions to file content in the generated order.
+ * @param {string} content - The original file content
+ * @param {Array<import('../src/types').ReviewCommentDraft>} suggestions - The suggestions to apply
+ * @returns {string} The content with all suggestions applied
+ */
+function applySuggestionsInGeneratedOrder(content, suggestions) {
+  let result = content
+  for (const suggestion of suggestions) {
     result = applySuggestion(result, suggestion)
   }
   return result
@@ -188,5 +206,21 @@ describe('Integration Tests', () => {
           )
         })
       })
+  })
+
+  describe('Batch safety', () => {
+    test('new-file-issue suggestions should apply safely in review batch order', async () => {
+      const beforeFile = 'test/fixtures/new-file-issue/before.md'
+      const afterFile = 'test/fixtures/new-file-issue/after.md'
+      const beforeContent = normalizeLineEndings(readFileSync(beforeFile, 'utf8'))
+      const afterContent = normalizeLineEndings(readFileSync(afterFile, 'utf8'))
+      const diffContent = await generateDiff(beforeFile, afterFile)
+      const parsed = parseGitDiff(diffContent)
+      const suggestions = sortCommentsForBatch(generateReviewComments(parsed))
+
+      const result = applySuggestionsInGeneratedOrder(beforeContent, suggestions)
+
+      assert.strictEqual(result, afterContent)
+    })
   })
 })

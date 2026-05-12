@@ -6,6 +6,7 @@ import {
   generateCommentKey,
   generateReviewComments,
   run,
+  sortCommentsForBatch,
 } from '../src/index.ts'
 
 describe('Unit Tests', () => {
@@ -94,6 +95,29 @@ describe('Unit Tests', () => {
       assert.strictEqual(
         result,
         '````suggestion\n  Indented line  \n\nWith empty line\n````'
+      )
+    })
+  })
+
+  describe('sortCommentsForBatch', () => {
+    test('should order multi-line suggestions by end line before start line', () => {
+      const sorted = sortCommentsForBatch([
+        {
+          path: 'file.md',
+          line: 90,
+          body: 'single-line suggestion',
+        },
+        {
+          path: 'file.md',
+          line: 100,
+          start_line: 1,
+          body: 'multi-line suggestion',
+        },
+      ])
+
+      assert.deepStrictEqual(
+        sorted.map((comment) => comment.body),
+        ['multi-line suggestion', 'single-line suggestion']
       )
     })
   })

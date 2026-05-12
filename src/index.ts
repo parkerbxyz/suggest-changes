@@ -534,6 +534,25 @@ function buildCommentDraft(
 }
 
 /**
+ * Sort comments so batched suggestion application processes lower lines before higher lines.
+ */
+export function sortCommentsForBatch(
+  comments: ReviewCommentDraft[]
+): ReviewCommentDraft[] {
+  return comments.toSorted((a, b) => {
+    const pathCompare = a.path.localeCompare(b.path)
+    if (pathCompare !== 0) return pathCompare
+
+    const lineCompare = b.line - a.line
+    if (lineCompare !== 0) return lineCompare
+
+    const aStart = a.start_line ?? a.line
+    const bStart = b.start_line ?? b.line
+    return bStart - aStart
+  })
+}
+
+/**
  * Partition an array into two arrays based on a predicate.
  */
 function partition<T>(
@@ -814,7 +833,9 @@ export async function run({
   }
 
   const reviewComments = comments.slice(0, MAX_COMMENTS_PER_REVIEW)
-  logComments('Suggestions to be included in review:', reviewComments)
+  // Submit lower lines first so batched application does not shift later anchors.
+  const orderedReviewComments = sortCommentsForBatch(reviewComments)
+  logComments('Suggestions to be included in review:', orderedReviewComments)
 
   const reviewBody = createReviewBodyWithLimitNotice(
     body,
@@ -829,7 +850,7 @@ export async function run({
     commit_id,
     body: reviewBody,
     event,
-    comments: reviewComments,
+    comments: orderedReviewComments,
   })
   info(
     `Review created successfully with ${reviewComments.length} suggestion(s).`
