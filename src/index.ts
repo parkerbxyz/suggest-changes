@@ -584,10 +584,13 @@ export function generateReviewComments(
     debug('Generated suggestions: 0')
   }
 
-  const { pass: unique, fail: skipped } = partition(
-    drafts,
-    (draft) => !existingCommentKeys.has(generateCommentKey(draft))
-  )
+  const seenKeys = new Set<string>()
+  const { pass: unique, fail: skipped } = partition(drafts, (draft) => {
+    const key = generateCommentKey(draft)
+    if (existingCommentKeys.has(key) || seenKeys.has(key)) return false
+    seenKeys.add(key)
+    return true
+  })
   if (skipped.length) {
     logComments(
       'Suggestions skipped because they would duplicate existing suggestions:',
@@ -812,9 +815,10 @@ export async function run({
 
   let existingComments: GetReviewComment[]
   try {
-    existingComments = (
-      await octokit.pulls.listReviewComments({ owner, repo, pull_number })
-    ).data
+    existingComments = await octokit.paginate(
+      octokit.pulls.listReviewComments,
+      { owner, repo, pull_number, per_page: 100 }
+    )
   } catch (err) {
     if (isRateLimitError(err)) {
       warning(

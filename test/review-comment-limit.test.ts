@@ -43,13 +43,17 @@ function createMockOctokit({
   createReview,
 }: {
   existingComments?: ReviewParams['comments']
-  listReviewComments?: () => Promise<{ data: ReviewParams['comments'] }>
+  listReviewComments?: () => Promise<ReviewParams['comments']>
   createReview?: (params: ReviewParams) => Promise<unknown>
 } = {}) {
+  const list = listReviewComments ?? (async () => existingComments)
   return {
+    paginate: async (fn: unknown) => {
+      if (fn !== list) throw new Error('Unexpected paginate target')
+      return list()
+    },
     pulls: {
-      listReviewComments:
-        listReviewComments ?? (async () => ({ data: existingComments })),
+      listReviewComments: list,
       createReview:
         createReview ??
         (async (_params: ReviewParams) => ({
@@ -222,5 +226,60 @@ describe('review comment limit', () => {
 
     assert.strictEqual(result.reviewCreated, false)
     assert.strictEqual(result.comments.length, 0)
+  })
+
+  test('returns no posted comments on 403 secondary rate limit', async () => {
+    const error = Object.assign(
+      new Error(
+        'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.'
+      ),
+      { status: 403, response: { headers: {} } }
+    )
+
+    const result = await run({
+      octokit: createMockOctokit({
+        createReview: async () => {
+          throw error
+        },
+      }),
+      owner: 'test',
+      repo: 'test',
+      pull_number: 1,
+      commit_id: 'abc123',
+      diff: createMockDiff(createMockFiles(1)),
+      event: 'COMMENT',
+      body: 'Review',
+    })
+
+    assert.strictEqual(result.reviewCreated, false)
+    assert.strictEqual(result.comments.length, 0)
+  })
+
+  test('dedupes duplicate suggestions generated within a single run', async () => {
+    // Two diff hunks producing the same path/line/suggestion should collapse to one comment.
+    const diff = [
+      `diff --git a/dup.md b/dup.md\n--- a/dup.md\n+++ b/dup.md\n@@ -1,1 +1,1 @@\n-old\n+new`,
+      `diff --git a/dup.md b/dup.md\n--- a/dup.md\n+++ b/dup.md\n@@ -1,1 +1,1 @@\n-old\n+new`,
+    ].join('\n')
+
+    const created: ReviewParams[] = []
+    await run({
+      octokit: createMockOctokit({
+        createReview: async (params) => {
+          created.push(params)
+          return { data: { id: 1 } }
+        },
+      }),
+      owner: 'test',
+      repo: 'test',
+      pull_number: 1,
+      commit_id: 'abc123',
+      diff,
+      event: 'COMMENT',
+      body: 'Review',
+    })
+
+    assert.strictEqual(created.length, 1)
+    assert.strictEqual(created[0].comments.length, 1)
   })
 })
