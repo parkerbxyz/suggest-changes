@@ -74,6 +74,7 @@ describe('review comment limit', () => {
 
     assert.strictEqual(createdReviews.length, 1)
     assert.strictEqual(createdReviews[0].comments.length, 100)
+    assert.ok(createdReviews[0].body.includes('> [!NOTE]'))
     assert.ok(createdReviews[0].body.includes('Posted 100 of 150'))
     assert.strictEqual(result.reviewCreated, true)
     assert.strictEqual(result.comments.length, 100)

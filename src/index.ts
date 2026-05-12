@@ -766,7 +766,7 @@ function createReviewBodyWithLimitNotice(
       ? '1 additional suggestion remains'
       : `${omittedCount} additional suggestions remain`
   const limitInfo =
-    `\n\n---\n\n**Note:** Posted ${postedComments} of ${totalComments} suggestions. ` +
+    `\n\n> [!NOTE]\n> Posted ${postedComments} of ${totalComments} suggestions. ` +
     `${omittedText}. Rerun the workflow (or push a new commit) to post the next batch.`
 
   return baseBody ? `${baseBody}${limitInfo}` : limitInfo.trim()
