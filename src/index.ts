@@ -115,17 +115,6 @@ function isRequestErrorLike(err: unknown): err is RequestErrorLike {
 }
 
 /**
- * Returns true for the known 422 "line must be part of the diff" validation failure.
- */
-function isLineOutsideDiffError(err: unknown): boolean {
-  return (
-    isRequestErrorLike(err) &&
-    err.status === 422 &&
-    /line must be part of the diff/i.test(err.message)
-  )
-}
-
-/**
  * Check if error is an API rate limit error (429 or 403 with rate limit message).
  */
 function isRateLimitError(err: unknown): err is RequestErrorLike {
@@ -757,23 +746,6 @@ async function filterSuggestionsInPullRequestDiff({
 }
 
 /**
- * Limit comments to the maximum GitHub accepts in one review.
- * @param {ReviewCommentDraft[]} comments - Comments to limit
- * @param {number} maxComments - Maximum comments to include
- * @returns {{comments: ReviewCommentDraft[], omittedCount: number}} Limited comments and omitted count
- */
-export function limitCommentsForReview(
-  comments: ReviewCommentDraft[],
-  maxComments = MAX_COMMENTS_PER_REVIEW
-): { comments: ReviewCommentDraft[]; omittedCount: number } {
-  const limitedComments = comments.slice(0, maxComments)
-  return {
-    comments: limitedComments,
-    omittedCount: comments.length - limitedComments.length,
-  }
-}
-
-/**
  * Create review body with information about omitted suggestions if needed.
  * @param {string} baseBody - Original review body
  * @param {number} postedComments - Number of comments included in this review
@@ -864,14 +836,8 @@ export async function run({
     return { comments: [], reviewCreated: false }
   }
 
-  const { comments: reviewComments, omittedCount } =
-    limitCommentsForReview(comments)
+  const reviewComments = comments.slice(0, MAX_COMMENTS_PER_REVIEW)
   logComments('Suggestions to be included in review:', reviewComments)
-  if (omittedCount > 0) {
-    info(
-      `Posting ${reviewComments.length} of ${comments.length} suggestions. ${omittedCount} additional suggestions remain for future workflow runs.`
-    )
-  }
 
   const reviewBody = createReviewBodyWithLimitNotice(
     body,
@@ -894,12 +860,6 @@ export async function run({
     )
     return { comments: reviewComments, reviewCreated: true }
   } catch (err) {
-    if (isLineOutsideDiffError(err)) {
-      warning(
-        'Review creation failed (422: line must be part of the diff). Returning without review.'
-      )
-      return { comments: [], reviewCreated: false }
-    }
     if (isRateLimitError(err)) {
       warning('Review creation failed: GitHub API rate limit exceeded.')
       warnRateLimitReset(err)
