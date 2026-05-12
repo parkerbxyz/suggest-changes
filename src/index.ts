@@ -585,17 +585,12 @@ export function generateReviewComments(
   }
 
   const seenKeys = new Set<string>()
-  const unique: ReviewCommentDraft[] = []
-  const skipped: ReviewCommentDraft[] = []
-  for (const draft of drafts) {
+  const { pass: unique, fail: skipped } = partition(drafts, (draft) => {
     const key = generateCommentKey(draft)
-    if (existingCommentKeys.has(key) || seenKeys.has(key)) {
-      skipped.push(draft)
-      continue
-    }
+    if (existingCommentKeys.has(key) || seenKeys.has(key)) return false
     seenKeys.add(key)
-    unique.push(draft)
-  }
+    return true
+  })
   if (skipped.length) {
     logComments(
       'Suggestions skipped because they would duplicate existing suggestions:',
