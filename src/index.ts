@@ -906,9 +906,21 @@ async function main() {
   const pull_number = Number(eventPayload.pull_request.number)
   const commit_id = eventPayload.pull_request.head.sha
 
-  const pullRequestFiles = (
-    await octokit.pulls.listFiles({ owner, repo, pull_number })
-  ).data.map((file: PullRequestFile) => file.filename)
+  let pullRequestFiles: string[]
+  try {
+    pullRequestFiles = (
+      await octokit.pulls.listFiles({ owner, repo, pull_number })
+    ).data.map((file: PullRequestFile) => file.filename)
+  } catch (err) {
+    if (isRateLimitError(err)) {
+      warning(
+        'Could not list pull request files: GitHub API rate limit exceeded.'
+      )
+      warnRateLimitReset(err)
+      return
+    }
+    throw err
+  }
 
   // Get the diff between the head branch and the base branch (limit to the files in the pull request)
   const diff = await getGitDiff(['--', ...pullRequestFiles])
