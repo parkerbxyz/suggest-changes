@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import {
-  createLimitedReviewBody,
+  createReviewBodyWithLimitNotice,
   limitCommentsForReview,
   run,
 } from '../src/index.ts'
@@ -77,11 +77,15 @@ describe('review comment limit', () => {
 
   test('adds omitted suggestion details to the review body when capped', () => {
     assert.strictEqual(
-      createLimitedReviewBody('Please fix these issues', 100, 100),
+      createReviewBodyWithLimitNotice('Please fix these issues', 100, 100),
       'Please fix these issues'
     )
 
-    const result = createLimitedReviewBody('Please fix these issues', 100, 150)
+    const result = createReviewBodyWithLimitNotice(
+      'Please fix these issues',
+      100,
+      150
+    )
 
     assert.ok(result.includes('Please fix these issues'))
     assert.ok(result.includes('Posted 100 of 150 suggestions'))

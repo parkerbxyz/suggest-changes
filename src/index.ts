@@ -776,7 +776,7 @@ export function limitCommentsForReview(
  * @param {number} totalComments - Total number of comments available for this run
  * @returns {string} Enhanced review body
  */
-export function createLimitedReviewBody(
+export function createReviewBodyWithLimitNotice(
   baseBody: string,
   postedComments: number,
   totalComments: number
@@ -856,7 +856,7 @@ export async function run({
     )
   }
 
-  const reviewBody = createLimitedReviewBody(
+  const reviewBody = createReviewBodyWithLimitNotice(
     body,
     reviewComments.length,
     comments.length
@@ -872,7 +872,9 @@ export async function run({
       event,
       comments: reviewComments,
     })
-    info(`Review created successfully with ${reviewComments.length} comments`)
+    info(
+      `Review created successfully with ${reviewComments.length} suggestion(s).`
+    )
     return { comments: reviewComments, reviewCreated: true }
   } catch (err) {
     if (isLineOutsideDiffError(err)) {
