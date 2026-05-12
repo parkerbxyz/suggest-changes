@@ -1,12 +1,20 @@
-// @ts-check
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
-import { RequestError } from '@octokit/request-error'
 import {
   createLimitedReviewBody,
   limitCommentsForReview,
   run,
-} from '../index.js'
+} from '../src/index.ts'
+
+type ReviewParams = {
+  body: string
+  comments: Array<{
+    path: string
+    line: number
+    start_line?: number
+    body: string
+  }>
+}
 
 /**
  * @param {number} count
@@ -29,16 +37,19 @@ function createMockDiff(files) {
     .join('\n')
 }
 
-/**
- * @param {{existingComments?: Array<{path: string, line?: number, start_line?: number, body: string}>, createReview?: (params: any) => Promise<any>}} [options]
- */
-function createMockOctokit({ existingComments = [], createReview } = {}) {
+function createMockOctokit({
+  existingComments = [],
+  createReview,
+}: {
+  existingComments?: ReviewParams['comments']
+  createReview?: (params: ReviewParams) => Promise<unknown>
+} = {}) {
   return {
     pulls: {
       listReviewComments: async () => ({ data: existingComments }),
       createReview:
         createReview ??
-        (async () => ({
+        (async (_params: ReviewParams) => ({
           data: { id: 1 },
         })),
     },
@@ -77,7 +88,7 @@ describe('review comment limit', () => {
 
   test('creates one review capped at 100 comments', async () => {
     const files = createMockFiles(150)
-    const createdReviews = []
+    const createdReviews: ReviewParams[] = []
 
     const result = await run({
       octokit: createMockOctokit({
@@ -106,7 +117,7 @@ describe('review comment limit', () => {
 
   test('dedupes existing comments before applying the cap', async () => {
     const files = createMockFiles(150)
-    const firstRunReviews = []
+    const firstRunReviews: ReviewParams[] = []
 
     await run({
       octokit: createMockOctokit({
@@ -124,7 +135,7 @@ describe('review comment limit', () => {
       body: 'Please fix',
     })
 
-    const secondRunReviews = []
+    const secondRunReviews: ReviewParams[] = []
     const result = await run({
       octokit: createMockOctokit({
         existingComments: firstRunReviews[0].comments,
@@ -149,19 +160,12 @@ describe('review comment limit', () => {
   })
 
   test('returns no posted comments when GitHub API rate-limits review creation', async () => {
-    const error = new RequestError('API rate limit exceeded', 429, {
+    const error = Object.assign(new Error('API rate limit exceeded'), {
+      status: 429,
       response: {
-        url: 'https://api.github.com/repos/test/test/pulls/1/reviews',
-        status: 429,
         headers: {
           'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600),
         },
-        data: {},
-      },
-      request: {
-        method: 'POST',
-        url: 'https://api.github.com/repos/test/test/pulls/1/reviews',
-        headers: {},
       },
     })
 

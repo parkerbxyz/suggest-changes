@@ -1,10 +1,9 @@
-// @ts-check
 import assert from 'node:assert'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import parseGitDiff from 'parse-git-diff'
-import { generateReviewComments, getGitDiff } from '../index.js'
+import { generateReviewComments, getGitDiff } from '../src/index.ts'
 
 const fixtureDir = 'test/fixtures'
 

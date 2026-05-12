@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    // Output configuration
+    "target": "ES2024",
+    "module": "ESNext",
+
+    // Module resolution
+    "moduleResolution": "bundler",
+
+    // Type checking
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "useUnknownInCatchVariables": true,
+    "noUncheckedIndexedAccess": true,
+
+    // Interop and performance
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist"]
+}

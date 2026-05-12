@@ -12,7 +12,7 @@ This is a GitHub Action that creates pull request review suggestions from workin
 
 ## Technology stack
 
-- **Language:** JavaScript (ES modules)
+- **Language:** TypeScript (ES modules)
 - **Runtime:** Node.js 24.5.0 or higher
 - **Package Manager:** npm 11.6.0
 - **Dependencies:**
@@ -25,14 +25,14 @@ This is a GitHub Action that creates pull request review suggestions from workin
 ### Code style
 
 - Use Prettier for code formatting (configuration in `package.json`)
-- Follow existing code patterns in `index.js`
+- Follow existing code patterns in `src/index.ts`
 
 ### Type safety
 
-- Use JSDoc type annotations for all functions (see existing patterns in `index.js`)
-- Define custom types at the top of files using `@typedef`
+- Use TypeScript type annotations for all functions (see existing patterns in `src/index.ts` and `src/types.ts`)
+- Define custom types in `src/types.ts` using TypeScript interfaces
 - Use type guards for runtime type checking (e.g., `isAddedLine`, `isDeletedLine`)
-- Enable TypeScript checking with `// @ts-check` at the top of files
+- All TypeScript strict mode options are enabled
 
 ### Naming conventions
 
@@ -56,8 +56,8 @@ This is a GitHub Action that creates pull request review suggestions from workin
 
 ### Test types
 
-1. **Unit tests** (`test/unit.test.js`): Test individual functions in isolation
-2. **Integration tests** (`test/integration.test.js`): Test end-to-end workflows with fixtures
+1. **Unit tests** (`test/unit.test.ts`): Test individual functions in isolation
+2. **Integration tests** (`test/fixtures.test.ts`): Test end-to-end workflows with fixtures
 3. **Snapshot tests**: Use snapshot testing for complex output validation
 
 ### Test commands

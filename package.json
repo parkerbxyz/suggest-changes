@@ -1,27 +1,28 @@
 {
   "name": "suggest-changes",
-  "version": "3.0.2",
+  "version": "3.0.4",
   "description": "A GitHub Action for turning working directory changes into pull request review suggestions",
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "ncc build",
-    "test": "node --test",
-    "test:coverage": "node --test --experimental-test-coverage",
-    "test:watch": "node --test --watch",
-    "test:update-snapshots": "node --test --test-update-snapshots"
+    "build": "ncc build src/index.ts",
+    "test": "tsx --test test/*.test.ts",
+    "test:coverage": "tsx --test --experimental-test-coverage test/*.test.ts",
+    "test:watch": "tsx --test --watch test/*.test.ts",
+    "test:update-snapshots": "tsx --test --test-update-snapshots test/*.test.ts"
   },
   "dependencies": {
-    "@actions/core": "^1.11.1",
-    "@actions/exec": "^1.1.1",
-    "@octokit/action": "^8.0.2",
-    "@octokit/request-error": "^7.0.1",
-    "parse-git-diff": "^0.0.19"
+    "@actions/core": "^3.0.1",
+    "@actions/exec": "^3.0.0",
+    "@octokit/action": "^8.0.4",
+    "parse-git-diff": "^0.0.20"
   },
   "devDependencies": {
     "@octokit/webhooks-types": "^7.6.1",
-    "@types/node": "^24.8.1",
-    "@vercel/ncc": "^0.38.4"
+    "@types/node": "^25.5.0",
+    "@vercel/ncc": "^0.38.4",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
   },
   "engines": {
     "node": ">=24.5.0"

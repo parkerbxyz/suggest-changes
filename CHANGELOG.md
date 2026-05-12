@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.0.4](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.3...v3.0.4) (2026-02-04)
+
+
+### Bug Fixes
+
+* **deps:** bump @actions/core from 2.0.2 to 3.0.0 ([#138](https://github.com/parkerbxyz/suggest-changes/issues/138)) ([187bab0](https://github.com/parkerbxyz/suggest-changes/commit/187bab0d212609c5e57f55f63ba4a52d1e867743))
+* **deps:** bump @actions/exec from 2.0.0 to 3.0.0 ([#137](https://github.com/parkerbxyz/suggest-changes/issues/137)) ([2b2677f](https://github.com/parkerbxyz/suggest-changes/commit/2b2677f506d2c73bb407cf38b101501ac94b242c))
+* **deps:** bump undici and @actions/http-client ([#139](https://github.com/parkerbxyz/suggest-changes/issues/139)) ([27babf8](https://github.com/parkerbxyz/suggest-changes/commit/27babf8b13f7f37d7767213327ec13160afb2499))
+
+## [3.0.3](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.2...v3.0.3) (2026-01-13)
+
+
+### Bug Fixes
+
+* **deps:** bump @actions/core from 1.11.1 to 2.0.1 ([#132](https://github.com/parkerbxyz/suggest-changes/issues/132)) ([d12137a](https://github.com/parkerbxyz/suggest-changes/commit/d12137a270686599aa72d5fbe2885ddf2deab87d))
+* **deps:** bump @actions/exec from 1.1.1 to 2.0.0 ([#131](https://github.com/parkerbxyz/suggest-changes/issues/131)) ([5d62b1a](https://github.com/parkerbxyz/suggest-changes/commit/5d62b1a4aab4e6363574cc6bc06cf1170fc9928a))
+* **deps:** bump @octokit/action from 8.0.2 to 8.0.4 ([#133](https://github.com/parkerbxyz/suggest-changes/issues/133)) ([17da405](https://github.com/parkerbxyz/suggest-changes/commit/17da405677fb024c2ed3b902b1ea597167aa69f2))
+
 ## [3.0.2](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.1...v3.0.2) (2025-10-25)
 
 

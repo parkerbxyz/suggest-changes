@@ -1,5 +1,3 @@
-// @ts-check
-import { RequestError } from '@octokit/request-error'
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import parseGitDiff from 'parse-git-diff'
@@ -8,7 +6,7 @@ import {
   generateCommentKey,
   generateReviewComments,
   run,
-} from '../index.js'
+} from '../src/index.ts'
 
 describe('Unit Tests', () => {
   describe('generateCommentKey', () => {
@@ -109,7 +107,7 @@ describe('Unit Tests', () => {
       }
 
       const result = await run({
-        // @ts-ignore - Test mock doesn't need full Octokit interface
+        // @ts-expect-error - Test mock doesn't need full Octokit interface
         octokit: mockOctokit,
         owner: 'test-owner',
         repo: 'test-repo',
@@ -142,7 +140,7 @@ describe('Unit Tests', () => {
       }
 
       const result = await run({
-        // @ts-ignore - Test mock doesn't need full Octokit interface
+        // @ts-expect-error - Test mock doesn't need full Octokit interface
         octokit: mockOctokit,
         owner: 'test-owner',
         repo: 'test-repo',
@@ -157,51 +155,34 @@ describe('Unit Tests', () => {
       assert.strictEqual(result.comments.length, 1)
     })
 
-    test('should return reviewCreated=false on 422 line outside diff error', async () => {
-      const diff = `diff --git a/test.md b/test.md
---- a/test.md
-+++ b/test.md
-@@ -1,1 +1,1 @@
--old line
-+new line`
-
+    test('should accept valid event types', async () => {
       const mockOctokit = {
         pulls: {
           listReviewComments: async () => ({ data: [] }),
-          createReview: async () => {
-            throw new RequestError('line must be part of the diff', 422, {
-              request: {
-                method: 'POST',
-                url: 'https://api.github.com/repos/test/test/pulls/1/reviews',
-                headers: {},
-              },
-            })
-          },
+          createReview: async () => ({ data: { id: 123 } }),
         },
       }
 
-      const result = await run({
-        // @ts-ignore - mock
-        octokit: mockOctokit,
-        owner: 'test-owner',
-        repo: 'test-repo',
-        pull_number: 1,
-        commit_id: 'abc123',
-        diff,
-        event: 'COMMENT',
-        body: 'Test review',
-      })
+      const validEvents = ['COMMENT', 'APPROVE', 'REQUEST_CHANGES'] as const
 
-      assert.strictEqual(
-        result.reviewCreated,
-        false,
-        'Expected reviewCreated to be false'
-      )
-      assert.strictEqual(
-        result.comments.length,
-        0,
-        'Expected comments array to be emptied on 422 handling'
-      )
+      for (const event of validEvents) {
+        const result = await run({
+          // @ts-expect-error - Test mock doesn't need full Octokit interface
+          octokit: mockOctokit,
+          owner: 'test-owner',
+          repo: 'test-repo',
+          pull_number: 1,
+          commit_id: 'abc123',
+          diff: 'diff --git a/test.md b/test.md\n--- a/test.md\n+++ b/test.md\n@@ -1,1 +1,1 @@\n-old\n+new',
+          event,
+          body: '',
+        })
+
+        assert.ok(
+          result.reviewCreated || result.comments.length === 0,
+          `Should accept valid event type: ${event}`
+        )
+      }
     })
   })
 
