@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.1.0](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.4...v3.1.0) (2026-05-12)
+
+
+### Features
+
+* cap review suggestions at GitHub comment limit ([#125](https://github.com/parkerbxyz/suggest-changes/issues/125)) ([e5b99b0](https://github.com/parkerbxyz/suggest-changes/commit/e5b99b0dfd9e34f0b136e93b7704adcb4b5167b1))
+
+
+### Bug Fixes
+
+* **deps:** bump @actions/core from 3.0.0 to 3.0.1 ([#146](https://github.com/parkerbxyz/suggest-changes/issues/146)) ([7f9bb91](https://github.com/parkerbxyz/suggest-changes/commit/7f9bb91dbccfc11c6347025deb4b00dd4acdce9f))
+* **deps:** bump parse-git-diff from 0.0.19 to 0.0.20 ([#142](https://github.com/parkerbxyz/suggest-changes/issues/142)) ([f812bb1](https://github.com/parkerbxyz/suggest-changes/commit/f812bb1a269cb4e35a9d1fc4d1b89935d33b6805))
+* **deps:** bump undici ([#144](https://github.com/parkerbxyz/suggest-changes/issues/144)) ([26c695d](https://github.com/parkerbxyz/suggest-changes/commit/26c695df136d710b9c240fbd20e8e7ea5bf32f4e))
+
 ## [3.0.4](https://github.com/parkerbxyz/suggest-changes/compare/v3.0.3...v3.0.4) (2026-02-04)
 
 
