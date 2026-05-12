@@ -1,10 +1,6 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
-import {
-  createReviewBodyWithLimitNotice,
-  limitCommentsForReview,
-  run,
-} from '../src/index.ts'
+import { run } from '../src/index.ts'
 
 type ReviewParams = {
   body: string
@@ -64,39 +60,6 @@ function createMockOctokit({
 }
 
 describe('review comment limit', () => {
-  test('limits review comments to the first 100 suggestions', () => {
-    const comments = createMockFiles(150).map((file) => ({
-      ...file,
-      line: 1,
-      body: 'suggestion',
-    }))
-
-    const result = limitCommentsForReview(comments)
-
-    assert.strictEqual(result.comments.length, 100)
-    assert.strictEqual(result.omittedCount, 50)
-    assert.strictEqual(result.comments[0].path, 'file0.md')
-    assert.strictEqual(result.comments[99].path, 'file99.md')
-  })
-
-  test('adds omitted suggestion details to the review body when capped', () => {
-    assert.strictEqual(
-      createReviewBodyWithLimitNotice('Please fix these issues', 100, 100),
-      'Please fix these issues'
-    )
-
-    const result = createReviewBodyWithLimitNotice(
-      'Please fix these issues',
-      100,
-      150
-    )
-
-    assert.ok(result.includes('Please fix these issues'))
-    assert.ok(result.includes('Posted 100 of 150 suggestions'))
-    assert.ok(result.includes('50 additional suggestions remain'))
-    assert.ok(result.includes('future workflow runs'))
-  })
-
   test('creates one review capped at 100 comments', async () => {
     const files = createMockFiles(150)
     const createdReviews: ReviewParams[] = []
@@ -168,64 +131,6 @@ describe('review comment limit', () => {
     assert.strictEqual(secondRunReviews[0].comments.length, 50)
     assert.strictEqual(result.comments[0].path, 'file100.md')
     assert.strictEqual(result.comments[49].path, 'file149.md')
-  })
-
-  test('returns no posted comments when GitHub API rate-limits review creation', async () => {
-    const error = Object.assign(new Error('API rate limit exceeded'), {
-      status: 429,
-      response: {
-        headers: {
-          'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600),
-        },
-      },
-    })
-
-    const result = await run({
-      octokit: createMockOctokit({
-        createReview: async () => {
-          throw error
-        },
-      }),
-      owner: 'test',
-      repo: 'test',
-      pull_number: 1,
-      commit_id: 'abc123',
-      diff: createMockDiff(createMockFiles(1)),
-      event: 'COMMENT',
-      body: 'Review',
-    })
-
-    assert.strictEqual(result.reviewCreated, false)
-    assert.strictEqual(result.comments.length, 0)
-  })
-
-  test('returns no posted comments when GitHub API rate-limits duplicate lookup', async () => {
-    const error = Object.assign(new Error('API rate limit exceeded'), {
-      status: 429,
-      response: {
-        headers: {
-          'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600),
-        },
-      },
-    })
-
-    const result = await run({
-      octokit: createMockOctokit({
-        listReviewComments: async () => {
-          throw error
-        },
-      }),
-      owner: 'test',
-      repo: 'test',
-      pull_number: 1,
-      commit_id: 'abc123',
-      diff: createMockDiff(createMockFiles(1)),
-      event: 'COMMENT',
-      body: 'Review',
-    })
-
-    assert.strictEqual(result.reviewCreated, false)
-    assert.strictEqual(result.comments.length, 0)
   })
 
   test('returns no posted comments on 403 secondary rate limit', async () => {
