@@ -12,19 +12,11 @@ type ReviewParams = {
   }>
 }
 
-/**
- * @param {number} count
- * @returns {Array<{path: string}>}
- */
-function createMockFiles(count) {
+function createMockFiles(count: number): Array<{ path: string }> {
   return Array.from({ length: count }, (_, i) => ({ path: `file${i}.md` }))
 }
 
-/**
- * @param {Array<{path: string}>} files
- * @returns {string}
- */
-function createMockDiff(files) {
+function createMockDiff(files: Array<{ path: string }>): string {
   return files
     .map(
       (file, i) =>

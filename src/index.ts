@@ -752,7 +752,7 @@ async function filterSuggestionsInPullRequestDiff({
  * @param {number} totalComments - Total number of comments available for this run
  * @returns {string} Enhanced review body
  */
-export function createReviewBodyWithLimitNotice(
+function createReviewBodyWithLimitNotice(
   baseBody: string,
   postedComments: number,
   totalComments: number
