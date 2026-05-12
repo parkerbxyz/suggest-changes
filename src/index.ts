@@ -137,6 +137,20 @@ function isRateLimitError(err: unknown): err is RequestErrorLike {
 }
 
 /**
+ * Log rate limit reset timing when GitHub provides it.
+ */
+function warnRateLimitReset(err: RequestErrorLike): void {
+  const resetTime = err.response?.headers?.['x-ratelimit-reset']
+  if (resetTime === undefined) return
+
+  const resetTimestamp = Number(resetTime)
+  if (Number.isFinite(resetTimestamp)) {
+    const resetDate = new Date(resetTimestamp * 1000)
+    warning(`Rate limit will reset at: ${resetDate.toISOString()}`)
+  }
+}
+
+/**
  * Filter changes by type for easier processing
  */
 const filterChangesByType = (changes: AnyLineChange[]): FilteredChanges => ({
@@ -796,9 +810,21 @@ export async function run({
 }: RunConfig): Promise<RunResult> {
   debug(`Diff output: ${diff}`)
 
-  const existingComments = (
-    await octokit.pulls.listReviewComments({ owner, repo, pull_number })
-  ).data
+  let existingComments: GetReviewComment[]
+  try {
+    existingComments = (
+      await octokit.pulls.listReviewComments({ owner, repo, pull_number })
+    ).data
+  } catch (err) {
+    if (isRateLimitError(err)) {
+      warning(
+        'Could not list existing review comments: GitHub API rate limit exceeded.'
+      )
+      warnRateLimitReset(err)
+      return { comments: [], reviewCreated: false }
+    }
+    throw err
+  }
   const existingCommentKeys = new Set<string>(
     existingComments.map(generateCommentKey)
   )
@@ -846,25 +872,18 @@ export async function run({
       event,
       comments: reviewComments,
     })
-    debug(`Review created successfully with ${reviewComments.length} comments`)
+    info(`Review created successfully with ${reviewComments.length} comments`)
     return { comments: reviewComments, reviewCreated: true }
   } catch (err) {
     if (isLineOutsideDiffError(err)) {
-      debug(
+      warning(
         'Review creation failed (422: line must be part of the diff). Returning without review.'
       )
       return { comments: [], reviewCreated: false }
     }
     if (isRateLimitError(err)) {
       warning('Review creation failed: GitHub API rate limit exceeded.')
-      const resetTime = err.response?.headers?.['x-ratelimit-reset']
-      if (resetTime !== undefined) {
-        const resetTimestamp = Number(resetTime)
-        if (Number.isFinite(resetTimestamp)) {
-          const resetDate = new Date(resetTimestamp * 1000)
-          warning(`Rate limit will reset at: ${resetDate.toISOString()}`)
-        }
-      }
+      warnRateLimitReset(err)
       return { comments: [], reviewCreated: false }
     }
     throw err

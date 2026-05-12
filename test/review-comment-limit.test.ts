@@ -39,14 +39,17 @@ function createMockDiff(files) {
 
 function createMockOctokit({
   existingComments = [],
+  listReviewComments,
   createReview,
 }: {
   existingComments?: ReviewParams['comments']
+  listReviewComments?: () => Promise<{ data: ReviewParams['comments'] }>
   createReview?: (params: ReviewParams) => Promise<unknown>
 } = {}) {
   return {
     pulls: {
-      listReviewComments: async () => ({ data: existingComments }),
+      listReviewComments:
+        listReviewComments ?? (async () => ({ data: existingComments })),
       createReview:
         createReview ??
         (async (_params: ReviewParams) => ({
@@ -172,6 +175,35 @@ describe('review comment limit', () => {
     const result = await run({
       octokit: createMockOctokit({
         createReview: async () => {
+          throw error
+        },
+      }),
+      owner: 'test',
+      repo: 'test',
+      pull_number: 1,
+      commit_id: 'abc123',
+      diff: createMockDiff(createMockFiles(1)),
+      event: 'COMMENT',
+      body: 'Review',
+    })
+
+    assert.strictEqual(result.reviewCreated, false)
+    assert.strictEqual(result.comments.length, 0)
+  })
+
+  test('returns no posted comments when GitHub API rate-limits duplicate lookup', async () => {
+    const error = Object.assign(new Error('API rate limit exceeded'), {
+      status: 429,
+      response: {
+        headers: {
+          'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600),
+        },
+      },
+    })
+
+    const result = await run({
+      octokit: createMockOctokit({
+        listReviewComments: async () => {
           throw error
         },
       }),
