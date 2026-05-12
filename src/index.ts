@@ -706,9 +706,14 @@ function logComments(
 }
 
 /**
- * Filters suggestion comments using the canonical server-side PR diff.
+ * Filter the supplied draft comments to those whose lines are part of the canonical
+ * pull request diff (per GitHub's API).
+ *
  * Returns a new array containing only valid suggestions and logs summary info.
- * Gracefully falls back (returns original comments) if the diff cannot be fetched/parsed.
+ * Falls back to the original comments when the diff cannot be fetched/parsed for
+ * benign reasons (e.g. unsupported endpoint, malformed response, parse error).
+ * Rate-limit errors propagate so the caller can stop processing instead of
+ * posting suggestions that may be outside the diff.
  */
 async function filterSuggestionsInPullRequestDiff({
   octokit,
