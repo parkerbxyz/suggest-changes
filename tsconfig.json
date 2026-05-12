@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     // Output configuration
+    "rootDir": "./src",
     "target": "ES2024",
     "module": "ESNext",
 
