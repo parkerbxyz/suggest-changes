@@ -34,7 +34,7 @@ async function generateDiff(beforeFile, afterFile) {
 /**
  * Apply a suggestion to file content
  * @param {string} content - The original file content
- * @param {import('../index.js').ReviewCommentDraft} suggestion - The suggestion to apply
+ * @param {import('../src/types').ReviewCommentDraft} suggestion - The suggestion to apply
  * @returns {string} The content with the suggestion applied
  */
 function applySuggestion(content, suggestion) {
@@ -75,7 +75,7 @@ function applySuggestion(content, suggestion) {
  * Apply multiple suggestions to file content in the correct order
  * Suggestions must be applied in reverse order (bottom to top) to avoid line number shifts
  * @param {string} content - The original file content
- * @param {Array<import('../index.js').ReviewCommentDraft>} suggestions - The suggestions to apply
+ * @param {Array<import('../src/types').ReviewCommentDraft>} suggestions - The suggestions to apply
  * @returns {string} The content with all suggestions applied
  */
 function applySuggestions(content, suggestions) {
@@ -97,7 +97,7 @@ function applySuggestions(content, suggestions) {
 /**
  * Apply multiple suggestions to file content in the generated order.
  * @param {string} content - The original file content
- * @param {Array<import('../index.js').ReviewCommentDraft>} suggestions - The suggestions to apply
+ * @param {Array<import('../src/types').ReviewCommentDraft>} suggestions - The suggestions to apply
  * @returns {string} The content with all suggestions applied
  */
 function applySuggestionsInGeneratedOrder(content, suggestions) {

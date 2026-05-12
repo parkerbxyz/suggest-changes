@@ -543,9 +543,12 @@ export function sortCommentsForBatch(
     const pathCompare = a.path.localeCompare(b.path)
     if (pathCompare !== 0) return pathCompare
 
+    const lineCompare = b.line - a.line
+    if (lineCompare !== 0) return lineCompare
+
     const aStart = a.start_line ?? a.line
     const bStart = b.start_line ?? b.line
-    return bStart - aStart || b.line - a.line
+    return bStart - aStart
   })
 }
 

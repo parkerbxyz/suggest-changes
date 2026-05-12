@@ -8,7 +8,7 @@ import { generateSuggestionBody, groupChangesForSuggestions } from '../src/index
 describe('Grouping algorithm for blank line insertions', () => {
   test('should create separate groups for each unchanged line followed by blank addition', () => {
     // Simulates adding blank lines after Line A and Line B: Line A (add blank line), Line B (add blank line), Line C
-    /** @type {import('../index.js').AnyLineChange[]} */
+    /** @type {import('../src/types').AnyLineChange[]} */
     const changes = [
       { type: 'UnchangedLine', lineBefore: 1, lineAfter: 1, content: 'Line A' },
       { type: 'AddedLine', lineAfter: 2, content: '' },
@@ -37,7 +37,7 @@ describe('Grouping algorithm for blank line insertions', () => {
   })
 
   test('should generate correct suggestions for blank line insertions', () => {
-    /** @type {import('../index.js').AnyLineChange[]} */
+    /** @type {import('../src/types').AnyLineChange[]} */
     const changes = [
       {
         type: 'UnchangedLine',
@@ -69,7 +69,7 @@ describe('Grouping algorithm for blank line insertions', () => {
   })
 
   test('should handle multiple blank lines being added', () => {
-    /** @type {import('../index.js').AnyLineChange[]} */
+    /** @type {import('../src/types').AnyLineChange[]} */
     const changes = [
       { type: 'UnchangedLine', lineBefore: 1, lineAfter: 1, content: 'Line A' },
       { type: 'AddedLine', lineAfter: 2, content: '' },
@@ -86,7 +86,7 @@ describe('Grouping algorithm for blank line insertions', () => {
   })
 
   test('should not split groups when there are deletions', () => {
-    /** @type {import('../index.js').AnyLineChange[]} */
+    /** @type {import('../src/types').AnyLineChange[]} */
     const changes = [
       { type: 'UnchangedLine', lineBefore: 1, lineAfter: 1, content: 'Line A' },
       { type: 'DeletedLine', lineBefore: 2, content: 'Old line' },
@@ -103,7 +103,7 @@ describe('Grouping algorithm for blank line insertions', () => {
   })
 
   test('should handle blank line at end of file', () => {
-    /** @type {import('../index.js').AnyLineChange[]} */
+    /** @type {import('../src/types').AnyLineChange[]} */
     const changes = [
       {
         type: 'UnchangedLine',
