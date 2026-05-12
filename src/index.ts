@@ -752,10 +752,6 @@ async function filterSuggestionsInPullRequestDiff({
 
 /**
  * Create review body with information about omitted suggestions if needed.
- * @param {string} baseBody - Original review body
- * @param {number} postedComments - Number of comments included in this review
- * @param {number} totalComments - Total number of comments available for this run
- * @returns {string} Enhanced review body
  */
 function createReviewBodyWithLimitNotice(
   baseBody: string,
