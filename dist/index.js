@@ -65153,13 +65153,11 @@ var __webpack_exports__ = {};
 
 // EXPORTS
 __nccwpck_require__.d(__webpack_exports__, {
-  Qc: () => (/* binding */ calculateLinePosition),
+  NV: () => (/* binding */ collectEditRuns),
   H9: () => (/* binding */ createSuggestion),
   E_: () => (/* binding */ generateCommentKey),
   o5: () => (/* binding */ generateReviewComments),
-  MW: () => (/* binding */ generateSuggestionBody),
   Wz: () => (/* binding */ getGitDiff),
-  jn: () => (/* binding */ groupChangesForSuggestions),
   eF: () => (/* binding */ run),
   IU: () => (/* binding */ sortCommentsForBatch)
 });
@@ -65311,16 +65309,16 @@ function file_command_issueFileCommand(command, message) {
     if (!filePath) {
         throw new Error(`Unable to find environment variable for file command ${command}`);
     }
-    if (!fs.existsSync(filePath)) {
+    if (!external_fs_namespaceObject.existsSync(filePath)) {
         throw new Error(`Missing file at path: ${filePath}`);
     }
-    fs.appendFileSync(filePath, `${toCommandValue(message)}${os.EOL}`, {
+    external_fs_namespaceObject.appendFileSync(filePath, `${utils_toCommandValue(message)}${external_os_namespaceObject.EOL}`, {
         encoding: 'utf8'
     });
 }
 function file_command_prepareKeyValueMessage(key, value) {
-    const delimiter = `ghadelimiter_${crypto.randomUUID()}`;
-    const convertedValue = toCommandValue(value);
+    const delimiter = `ghadelimiter_${external_crypto_namespaceObject.randomUUID()}`;
+    const convertedValue = utils_toCommandValue(value);
     // These should realistically never happen, but just in case someone finds a
     // way to exploit uuid generation let's not allow keys or values that contain
     // the delimiter.
@@ -65330,7 +65328,7 @@ function file_command_prepareKeyValueMessage(key, value) {
     if (convertedValue.includes(delimiter)) {
         throw new Error(`Unexpected input: value should not contain the delimiter "${delimiter}"`);
     }
-    return `${key}<<${delimiter}${os.EOL}${convertedValue}${os.EOL}${delimiter}`;
+    return `${key}<<${delimiter}${external_os_namespaceObject.EOL}${convertedValue}${external_os_namespaceObject.EOL}${delimiter}`;
 }
 //# sourceMappingURL=file-command.js.map
 ;// CONCATENATED MODULE: external "path"
@@ -67952,10 +67950,10 @@ function getBooleanInput(name, options) {
 function setOutput(name, value) {
     const filePath = process.env['GITHUB_OUTPUT'] || '';
     if (filePath) {
-        return issueFileCommand('OUTPUT', prepareKeyValueMessage(name, value));
+        return file_command_issueFileCommand('OUTPUT', file_command_prepareKeyValueMessage(name, value));
     }
-    process.stdout.write(os.EOL);
-    issueCommand('set-output', { name }, toCommandValue(value));
+    process.stdout.write(external_os_namespaceObject.EOL);
+    command_issueCommand('set-output', { name }, utils_toCommandValue(value));
 }
 /**
  * Enables or disables the echoing of commands into stdout for the rest of the step.
@@ -72131,6 +72129,8 @@ function getApiBaseUrl() {
 const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
 ;// CONCATENATED MODULE: external "node:process"
 const external_node_process_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:process");
+// EXTERNAL MODULE: external "node:url"
+var external_node_url_ = __nccwpck_require__(3136);
 ;// CONCATENATED MODULE: ./node_modules/parse-git-diff/build/mjs/context.js
 class Context {
     line = 1;
@@ -72547,6 +72547,7 @@ function getFilePath(ctx, input, type) {
 
 
 
+
 // GitHub's undocumented limit for comments per review.
 // Suggestions beyond this limit are left for future workflow runs.
 const MAX_COMMENTS_PER_REVIEW = 100;
@@ -72633,309 +72634,143 @@ function warnRateLimitReset(err) {
     }
 }
 /**
- * Filter changes by type for easier processing
+ * Segment a hunk's changes into edit runs: maximal sequences of consecutive
+ * added/deleted lines. Each run is one minimal contiguous edit and maps to
+ * exactly one suggestion. The unchanged lines immediately before and after
+ * each run are recorded so pure insertions can anchor an existing line
+ * (the diff is generated with --unified=1, so a context line is present
+ * except at file boundaries). Marker lines such as "\ No newline at end of
+ * file" are ignored and do not interrupt a run.
  */
-const filterChangesByType = (changes) => ({
-    addedLines: changes.filter(isAddedLine),
-    deletedLines: changes.filter(isDeletedLine),
-    unchangedLines: changes.filter(isUnchangedLine),
-});
-/**
- * Check if group matches pattern: first is unchanged, rest are all added lines.
- * This pattern indicates blank line insertions after content lines.
- */
-function isUnchangedFollowedByAdded(group) {
-    const first = group[0];
-    return (group.length > 0 &&
-        first !== undefined &&
-        isUnchangedLine(first) &&
-        group.slice(1).every(isAddedLine));
-}
-/**
- * Check if two changes represent a line movement (same content, different positions).
- */
-function isContentMovement(deleted, added) {
-    return deleted.content === added.content;
-}
-/**
- * Detect if changes contain a line movement pattern (deletion + addition of same content).
- * Returns the deleted and added lines if a movement is detected, null otherwise.
- */
-function detectLineMovement(changes) {
-    const { deletedLines, addedLines } = filterChangesByType(changes);
-    if (deletedLines.length === 1 && addedLines.length === 1) {
-        const deleted = deletedLines[0];
-        const added = addedLines[0];
-        if (deleted && added && isContentMovement(deleted, added)) {
-            return { deleted, added };
+function collectEditRuns(changes) {
+    const runs = [];
+    let currentRun = null;
+    let lastContext;
+    for (const change of changes) {
+        if (isUnchangedLine(change)) {
+            if (currentRun) {
+                currentRun.followingContext = change;
+                currentRun = null;
+            }
+            lastContext = change;
+        }
+        else if (isAddedLine(change) || isDeletedLine(change)) {
+            if (!currentRun) {
+                currentRun = {
+                    deletedLines: [],
+                    addedLines: [],
+                    precedingContext: lastContext,
+                    followingContext: undefined,
+                };
+                runs.push(currentRun);
+            }
+            if (isDeletedLine(change)) {
+                currentRun.deletedLines.push(change);
+            }
+            else {
+                currentRun.addedLines.push(change);
+            }
         }
     }
+    return runs;
+}
+/**
+ * Check if a run is a pure insertion (no deleted lines).
+ */
+function isPureInsertion(run) {
+    return run.deletedLines.length === 0;
+}
+/**
+ * Build a review comment draft for an edit run.
+ *
+ * Runs with deletions replace exactly the deleted line range with the added
+ * content (empty suggestion for pure deletions). Pure insertions cannot
+ * target zero lines on GitHub, so they anchor one adjacent existing line and
+ * include its content in the body: the line before the insertion point by
+ * default, or the line after it when the insertion is at the top of the file.
+ * Returns null when there is no existing line to anchor (empty before-file).
+ */
+function buildCommentDraft(path, run) {
+    const addedContent = run.addedLines.map((line) => line.content);
+    const firstDeleted = run.deletedLines.at(0);
+    const lastDeleted = run.deletedLines.at(-1);
+    if (firstDeleted && lastDeleted) {
+        return {
+            path,
+            body: createSuggestion(addedContent.join('\n')),
+            line: lastDeleted.lineBefore,
+            ...(run.deletedLines.length > 1 && {
+                start_line: firstDeleted.lineBefore,
+                start_side: 'RIGHT',
+            }),
+        };
+    }
+    if (run.precedingContext) {
+        return {
+            path,
+            body: createSuggestion([run.precedingContext.content, ...addedContent].join('\n')),
+            line: run.precedingContext.lineBefore,
+        };
+    }
+    if (run.followingContext) {
+        return {
+            path,
+            body: createSuggestion([...addedContent, run.followingContext.content].join('\n')),
+            line: run.followingContext.lineBefore,
+        };
+    }
+    core_debug(`Skipping insertion in ${path}: no existing line to anchor a suggestion to (empty file)`);
     return null;
 }
 /**
- * Detect if the group contains a line movement pattern where content is deleted
- * and re-added at a different location (typically to insert blank lines).
- * Pattern: [..., Deleted line, Unchanged line(s), upcoming Added line with same content]
- */
-function isLineMovement(currentGroup, nextChange) {
-    // Check if nextChange is an added line
-    if (!isAddedLine(nextChange))
-        return false;
-    // Look for a deleted line in the current group
-    const deletedLine = currentGroup.find(isDeletedLine);
-    if (!deletedLine)
-        return false;
-    // Check if the deleted and added lines have the same content
-    // This indicates the line is being moved, not changed
-    return isContentMovement(deletedLine, nextChange);
-}
-/**
- * Check if current group should be closed for blank line insertion pattern.
- * Pattern: [Unchanged, Added...] followed by another Unchanged.
- * This helps create clean [Unchanged, Added] pairs for blank line insertions.
- */
-function shouldSplitForBlankLineInsertion(currentGroup, nextChange) {
-    return isUnchangedFollowedByAdded(currentGroup) && isUnchangedLine(nextChange);
-}
-/**
- * Find the line number of the last added or deleted line (excluding unchanged lines).
- * Used to detect gaps between changes for proper grouping.
- */
-function getLastChangedLineNumber(group) {
-    const lastChange = group.findLast((c) => isDeletedLine(c) || isAddedLine(c));
-    if (!lastChange)
-        return null;
-    return isDeletedLine(lastChange)
-        ? lastChange.lineBefore
-        : lastChange.lineAfter;
-}
-/**
- * Group changes into logical suggestion groups based on line proximity.
+ * Build review comment drafts for all edit runs in a hunk.
  *
- * Groups contiguous or nearly contiguous changes together to create logical
- * suggestions that make sense when reviewing code. Unchanged lines are included
- * for context but don't affect contiguity calculations.
- *
- * Special case for blank line insertions (https://github.com/parkerbxyz/suggest-changes/issues/118):
- * When linters add blank lines, we get patterns like [Unchanged, Add(""), Unchanged, Add(""), ...].
- * We split these into separate [Unchanged, Add("")] pairs to create intuitive suggestions
- * that show adding a blank line after each content line, rather than confusing multi-line groups.
- *
- * Special case for line movements:
- * When a line is deleted and re-added at a different location (e.g., to insert blank lines before it),
- * we keep the deletion and addition in the same group to avoid creating separate delete/add suggestions.
+ * Handles one anchor collision: an insertion at the top of the file anchors
+ * line 1 via its following context line, and an insertion right after line 1
+ * anchors that same line. Such neighboring runs are merged into a single
+ * suggestion (added lines, then line 1's content, then the other run's added
+ * lines) so the review does not contain two suggestions for one line.
  */
-function groupChangesForSuggestions(changes) {
-    if (changes.length === 0)
-        return [];
-    const groups = [];
-    let currentGroup = [];
-    for (let i = 0; i < changes.length; i++) {
-        const change = changes[i];
-        if (!change)
+function buildCommentDraftsForHunk(path, changes) {
+    const runs = collectEditRuns(changes);
+    const drafts = [];
+    for (let i = 0; i < runs.length; i++) {
+        const run = runs[i];
+        if (!run)
             continue;
-        // Check if we should split the group for blank line insertion pattern
-        if (shouldSplitForBlankLineInsertion(currentGroup, change)) {
-            groups.push(currentGroup);
-            currentGroup = [change];
+        const nextRun = runs[i + 1];
+        if (isPureInsertion(run) &&
+            !run.precedingContext &&
+            run.followingContext &&
+            nextRun &&
+            isPureInsertion(nextRun) &&
+            nextRun.precedingContext === run.followingContext) {
+            drafts.push({
+                path,
+                body: createSuggestion([
+                    ...run.addedLines.map((line) => line.content),
+                    run.followingContext.content,
+                    ...nextRun.addedLines.map((line) => line.content),
+                ].join('\n')),
+                line: run.followingContext.lineBefore,
+            });
+            i++;
             continue;
         }
-        // Determine line number for gap detection
-        const lineNumber = isDeletedLine(change)
-            ? change.lineBefore
-            : isAddedLine(change)
-                ? change.lineAfter
-                : isUnchangedLine(change)
-                    ? change.lineBefore
-                    : null;
-        if (lineNumber === null)
-            continue;
-        // Get the last changed line number (ignoring unchanged lines)
-        const lastChangedLineNumber = getLastChangedLineNumber(currentGroup);
-        // Check if this looks like a line movement before applying gap detection
-        const appearsToBeLineMovement = isLineMovement(currentGroup, change);
-        // Start new group if there's a line gap between actual changes (not unchanged lines)
-        // BUT: Don't split if this appears to be a line movement (delete + re-add same content)
-        if (!isUnchangedLine(change) &&
-            lastChangedLineNumber !== null &&
-            lineNumber > lastChangedLineNumber + 1 &&
-            !appearsToBeLineMovement) {
-            groups.push(currentGroup);
-            currentGroup = [];
-        }
-        currentGroup.push(change);
+        const draft = buildCommentDraft(path, run);
+        if (draft)
+            drafts.push(draft);
     }
-    if (currentGroup.length > 0)
-        groups.push(currentGroup);
-    return groups;
-}
-/**
- * Helper function to determine if context line comes before added lines.
- */
-const getContextLineComesFirst = (unchangedLines, addedLines) => {
-    const firstUnchanged = unchangedLines[0];
-    const firstAdded = addedLines[0];
-    if (!firstUnchanged || !firstAdded)
-        return false;
-    return firstUnchanged.lineAfter < firstAdded.lineAfter;
-};
-/**
- * Determine the anchor line for pure additions with context.
- */
-function getAnchorForAdditions(firstUnchangedLine, unchangedLines, addedLines) {
-    if (getContextLineComesFirst(unchangedLines, addedLines)) {
-        return firstUnchangedLine.lineBefore; // Context comes first: anchor to it
-    }
-    return Math.max(1, firstUnchangedLine.lineBefore - 1); // Context comes after: anchor to line before it
-}
-/**
- * Generate suggestion body and line count for a group of changes
- */
-function generateSuggestionBody(changes) {
-    const { addedLines, deletedLines, unchangedLines } = filterChangesByType(changes);
-    // Detect line movement: deletion and addition of same content.
-    // This happens when linters move lines to insert blank lines before them.
-    // Example: Line "foo" at position 5 is deleted and re-added at position 3.
-    // Without this special handling, we'd suggest "replace 'foo' with 'foo'" (confusing no-op).
-    // Instead, we suggest inserting a blank line before the moved content.
-    const movement = detectLineMovement(changes);
-    if (movement) {
-        const { deleted } = movement;
-        // Find the unchanged line before the deletion (context line)
-        const unchangedBeforeDeletion = unchangedLines.find((u) => u.lineBefore < deleted.lineBefore);
-        if (unchangedBeforeDeletion) {
-            // Count unchanged blank lines after the deleted line in the original file.
-            // When the line moves up, these blanks end up after it in the new position.
-            // To avoid consecutive blanks, we keep N-1 of them (removing one redundant blank).
-            const blanksAfterDeletion = unchangedLines.filter((u) => u.lineBefore > deleted.lineBefore && u.content === '');
-            // Build suggestion to show what the final state should be:
-            // 1. Context line (unchanged before deletion)
-            // 2. New blank line (being inserted)
-            // 3. Moved content line
-            // 4. Keep N-1 of the existing trailing blanks to maintain the same total number of blanks
-            //    (we're adding 1 new blank, so we keep N-1 existing ones to avoid increasing the total)
-            const suggestionLines = [
-                unchangedBeforeDeletion.content,
-                '',
-                deleted.content,
-            ];
-            // Keep only N-1 existing blanks by skipping the first (index 0) using slice(1)
-            // This maintains the same total blank line count after inserting the new blank
-            blanksAfterDeletion.slice(1).forEach(() => suggestionLines.push(''));
-            // Calculate total lines being replaced in the suggestion:
-            // - 1 unchanged context line
-            // - 1 deleted/moved line
-            // - N trailing blank lines after deletion
-            const totalReplacedLines = 1 + 1 + blanksAfterDeletion.length;
-            return {
-                body: createSuggestion(suggestionLines.join('\n')),
-                lineCount: totalReplacedLines,
-            };
-        }
-    }
-    // No additions means no content to suggest, except for pure deletions (empty replacement block)
-    if (addedLines.length === 0) {
-        if (deletedLines.length === 0)
-            return null;
-        return { body: createSuggestion(''), lineCount: deletedLines.length };
-    }
-    // Pure additions: include context if available
-    if (deletedLines.length === 0) {
-        const contextLineComesFirst = getContextLineComesFirst(unchangedLines, addedLines);
-        const firstUnchanged = unchangedLines[0];
-        const suggestionLines = contextLineComesFirst && firstUnchanged
-            ? [firstUnchanged.content, ...addedLines.map((line) => line.content)]
-            : addedLines.map((line) => line.content);
-        // lineCount represents the number of existing (anchor) lines being replaced,
-        // not the number of lines in the suggestion body (which can include context plus additions).
-        return {
-            body: createSuggestion(suggestionLines.join('\n')),
-            lineCount: contextLineComesFirst ? 1 : addedLines.length,
-        };
-    }
-    // Mixed changes: replace deleted content with added content
-    const suggestionLines = addedLines.map((line) => line.content);
-    return {
-        body: createSuggestion(suggestionLines.join('\n')),
-        lineCount: deletedLines.length,
-    };
-}
-/**
- * Calculate line positioning for GitHub review comments.
- */
-function calculateLinePosition(groupChanges, lineCount, fromFileRange) {
-    const { addedLines, unchangedLines } = filterChangesByType(groupChanges);
-    // Try to find the best target line in order of preference
-    const firstDeletedLine = groupChanges.find(isDeletedLine);
-    const firstUnchangedLine = unchangedLines.length > 0 ? unchangedLines[0] : undefined;
-    // Log unexpected state: unchanged line present but no added lines
-    if (firstUnchangedLine && addedLines.length === 0 && !firstDeletedLine) {
-        core_debug(`[BUG] Unexpected state: firstUnchangedLine present but addedLines.length === 0. ` +
-            `This branch should not be reached. groupChanges: ${JSON.stringify(groupChanges)}`);
-    }
-    // Check for line movement: if we have deletion and addition of same content,
-    // anchor to the unchanged line before the deletion
-    const movement = detectLineMovement(groupChanges);
-    if (movement &&
-        firstUnchangedLine &&
-        firstUnchangedLine.lineBefore < movement.deleted.lineBefore) {
-        // Line movement: anchor to the unchanged line before the deletion
-        const startLine = firstUnchangedLine.lineBefore;
-        return { startLine, endLine: startLine + lineCount - 1 };
-    }
-    // Determine anchor line based on the type of change
-    const startLine = firstDeletedLine?.lineBefore ?? // Deletions: use original line
-        (firstUnchangedLine && addedLines.length > 0
-            ? getAnchorForAdditions(firstUnchangedLine, unchangedLines, addedLines) // Pure additions with context
-            : firstUnchangedLine?.lineBefore ?? fromFileRange.start); // Fallback to context line or file range
-    return { startLine, endLine: startLine + lineCount - 1 };
+    return drafts;
 }
 /**
  * Function to generate a unique key for a comment
  */
 const generateCommentKey = (comment) => `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${comment.body}`;
 /**
- * Lazily iterate over all suggestion groups in a parsed diff.
- * Yields objects containing path, fromFileRange, and group changes.
- */
-function* iterateSuggestionGroups(parsedDiff) {
-    for (const file of parsedDiff.files) {
-        if (file.type !== 'ChangedFile')
-            continue;
-        const path = file.path;
-        for (const chunk of file.chunks) {
-            if (chunk.type !== 'Chunk')
-                continue;
-            const { fromFileRange, changes } = chunk;
-            const groups = groupChangesForSuggestions(changes);
-            for (const group of groups) {
-                yield { path, fromFileRange, group };
-            }
-        }
-    }
-}
-/**
- * Build a review comment draft from a suggestion group.
- * Returns null if the group does not produce a valid suggestion body.
- */
-function buildCommentDraft(path, fromFileRange, group) {
-    const suggestion = generateSuggestionBody(group);
-    if (!suggestion)
-        return null;
-    const { body, lineCount } = suggestion;
-    const { startLine, endLine } = calculateLinePosition(group, lineCount, fromFileRange);
-    return {
-        path,
-        body,
-        line: endLine,
-        ...(lineCount > 1 && {
-            start_line: startLine,
-            start_side: 'RIGHT',
-        }),
-    };
-}
-/**
- * Sort comments so batched suggestion application processes lower lines before higher lines.
+ * Sort comments bottom-up (higher lines before lower lines) per file so
+ * batched suggestion application does not shift the anchors of suggestions
+ * that have not been applied yet.
  */
 function sortCommentsForBatch(comments) {
     return comments.toSorted((a, b) => {
@@ -72967,10 +72802,14 @@ function partition(items, predicate) {
  */
 function generateReviewComments(parsedDiff, existingCommentKeys = new Set()) {
     const drafts = [];
-    for (const { path, fromFileRange, group } of iterateSuggestionGroups(parsedDiff)) {
-        const draft = buildCommentDraft(path, fromFileRange, group);
-        if (draft)
-            drafts.push(draft);
+    for (const file of parsedDiff.files) {
+        if (file.type !== 'ChangedFile')
+            continue;
+        for (const chunk of file.chunks) {
+            if (chunk.type !== 'Chunk')
+                continue;
+            drafts.push(...buildCommentDraftsForHunk(file.path, chunk.changes));
+        }
     }
     // Log all generated suggestions with detailed debug info
     if (drafts.length) {
@@ -73142,10 +72981,15 @@ async function run({ octokit, owner, repo, pull_number, commit_id, diff, event, 
         comments: initialComments,
     });
     if (!comments.length) {
-        return { comments: [], reviewCreated: false };
+        return {
+            comments: [],
+            reviewCreated: false,
+            suggestionsPosted: 0,
+            suggestionsRemaining: 0,
+        };
     }
     const reviewComments = comments.slice(0, MAX_COMMENTS_PER_REVIEW);
-    // Submit lower lines first so batched application does not shift later anchors.
+    // Submit higher lines first (bottom-up) so batched application does not shift the anchors of suggestions yet to be applied.
     const orderedReviewComments = sortCommentsForBatch(reviewComments);
     logComments('Suggestions to be included in review:', orderedReviewComments);
     const reviewBody = createReviewBodyWithLimitNotice(body, reviewComments.length, comments.length);
@@ -73159,7 +73003,19 @@ async function run({ octokit, owner, repo, pull_number, commit_id, diff, event, 
         comments: orderedReviewComments,
     });
     info(`Review created successfully with ${reviewComments.length} suggestion(s).`);
-    return { comments: reviewComments, reviewCreated: true };
+    return {
+        comments: reviewComments,
+        reviewCreated: true,
+        suggestionsPosted: reviewComments.length,
+        suggestionsRemaining: comments.length - reviewComments.length,
+    };
+}
+/**
+ * Publish the run's suggestion counts as action outputs.
+ */
+function setSuggestionOutputs(posted, remaining) {
+    setOutput('suggestions-posted', posted);
+    setOutput('suggestions-remaining', remaining);
 }
 // Main entrypoint (only when executed directly)
 async function main() {
@@ -73183,7 +73039,12 @@ async function main() {
     }
     const pull_number = Number(eventPayload.pull_request.number);
     const commit_id = eventPayload.pull_request.head.sha;
-    const pullRequestFiles = (await octokit.pulls.listFiles({ owner, repo, pull_number })).data.map((file) => file.filename);
+    const pullRequestFiles = (await octokit.paginate(octokit.pulls.listFiles, {
+        owner,
+        repo,
+        pull_number,
+        per_page: 100,
+    })).map((file) => file.filename);
     // Get the diff between the head branch and the base branch (limit to the files in the pull request)
     const diff = await getGitDiff(['--', ...pullRequestFiles]);
     // Validate and parse the event input
@@ -73194,26 +73055,38 @@ async function main() {
     }
     const event = eventInput;
     const body = getInput('comment') || '';
-    await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body });
+    const result = await run({
+        octokit,
+        owner,
+        repo,
+        pull_number,
+        commit_id,
+        diff,
+        event,
+        body,
+    });
+    setSuggestionOutputs(result.suggestionsPosted, result.suggestionsRemaining);
 }
-if (import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL handles Windows paths (drive letters, backslashes), which a
+// naive `file://${path}` template does not.
+if (process.argv[1] &&
+    import.meta.url === (0,external_node_url_.pathToFileURL)(process.argv[1]).href) {
     main().catch((err) => {
         if (isRateLimitError(err)) {
             warning(`GitHub API rate limit exceeded: ${err.message}`);
             warnRateLimitReset(err);
+            setSuggestionOutputs(0, 0);
             return;
         }
         setFailed(err instanceof Error ? err.message : String(err));
     });
 }
 
-var __webpack_exports__calculateLinePosition = __webpack_exports__.Qc;
+var __webpack_exports__collectEditRuns = __webpack_exports__.NV;
 var __webpack_exports__createSuggestion = __webpack_exports__.H9;
 var __webpack_exports__generateCommentKey = __webpack_exports__.E_;
 var __webpack_exports__generateReviewComments = __webpack_exports__.o5;
-var __webpack_exports__generateSuggestionBody = __webpack_exports__.MW;
 var __webpack_exports__getGitDiff = __webpack_exports__.Wz;
-var __webpack_exports__groupChangesForSuggestions = __webpack_exports__.jn;
 var __webpack_exports__run = __webpack_exports__.eF;
 var __webpack_exports__sortCommentsForBatch = __webpack_exports__.IU;
-export { __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__groupChangesForSuggestions as groupChangesForSuggestions, __webpack_exports__run as run, __webpack_exports__sortCommentsForBatch as sortCommentsForBatch };
+export { __webpack_exports__collectEditRuns as collectEditRuns, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__run as run, __webpack_exports__sortCommentsForBatch as sortCommentsForBatch };
