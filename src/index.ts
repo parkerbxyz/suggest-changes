@@ -304,7 +304,9 @@ export const generateCommentKey = (
   }`
 
 /**
- * Sort comments so batched suggestion application processes lower lines before higher lines.
+ * Sort comments bottom-up (higher lines before lower lines) per file so
+ * batched suggestion application does not shift the anchors of suggestions
+ * that have not been applied yet.
  */
 export function sortCommentsForBatch(
   comments: ReviewCommentDraft[]
@@ -604,7 +606,7 @@ export async function run({
   }
 
   const reviewComments = comments.slice(0, MAX_COMMENTS_PER_REVIEW)
-  // Submit lower lines first so batched application does not shift later anchors.
+  // Submit higher lines first (bottom-up) so batched application does not shift the anchors of suggestions yet to be applied.
   const orderedReviewComments = sortCommentsForBatch(reviewComments)
   logComments('Suggestions to be included in review:', orderedReviewComments)
 
