@@ -661,8 +661,13 @@ async function main() {
   const commit_id = eventPayload.pull_request.head.sha
 
   const pullRequestFiles = (
-    await octokit.pulls.listFiles({ owner, repo, pull_number })
-  ).data.map((file: PullRequestFile) => file.filename)
+    await octokit.paginate(octokit.pulls.listFiles, {
+      owner,
+      repo,
+      pull_number,
+      per_page: 100,
+    })
+  ).map((file: PullRequestFile) => file.filename)
 
   // Get the diff between the head branch and the base branch (limit to the files in the pull request)
   const diff = await getGitDiff(['--', ...pullRequestFiles])
