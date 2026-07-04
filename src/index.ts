@@ -4,6 +4,7 @@ import { Octokit } from '@octokit/action'
 
 import { readFileSync } from 'node:fs'
 import { env } from 'node:process'
+import { pathToFileURL } from 'node:url'
 import parseGitDiff from 'parse-git-diff'
 
 import type {
@@ -686,7 +687,12 @@ async function main() {
   await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body })
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL handles Windows paths (drive letters, backslashes), which a
+// naive `file://${path}` template does not.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   main().catch((err) => {
     if (isRateLimitError(err)) {
       warning(`GitHub API rate limit exceeded: ${err.message}`)
