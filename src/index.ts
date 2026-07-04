@@ -146,14 +146,14 @@ function warnRateLimitReset(err: RequestErrorLike): void {
 
 /**
  * Segment a hunk's changes into edit runs: maximal sequences of consecutive
- * added/deleted lines. Each run is one minimal contiguous edit and maps to
- * exactly one suggestion. The unchanged lines immediately before and after
- * each run are recorded so pure insertions can anchor an existing line
- * (the diff is generated with --unified=1, so a context line is present
- * except at file boundaries). Marker lines such as "\ No newline at end of
- * file" are ignored and do not interrupt a run.
+ * added/deleted lines, in diff order. Each run is one minimal contiguous
+ * edit. The unchanged lines immediately before and after each run are
+ * recorded so pure insertions can anchor an existing line (the diff is
+ * generated with --unified=1, so a context line is present except at file
+ * boundaries). Marker lines such as "\ No newline at end of file" are
+ * ignored and do not interrupt a run.
  */
-export function collectEditRuns(changes: AnyLineChange[]): EditRun[] {
+function collectEditRuns(changes: AnyLineChange[]): EditRun[] {
   const runs: EditRun[] = []
   let currentRun: EditRun | null = null
   let lastContext: UnchangedLine | undefined
@@ -168,18 +168,13 @@ export function collectEditRuns(changes: AnyLineChange[]): EditRun[] {
     } else if (isAddedLine(change) || isDeletedLine(change)) {
       if (!currentRun) {
         currentRun = {
-          deletedLines: [],
-          addedLines: [],
+          changes: [],
           precedingContext: lastContext,
           followingContext: undefined,
         }
         runs.push(currentRun)
       }
-      if (isDeletedLine(change)) {
-        currentRun.deletedLines.push(change)
-      } else {
-        currentRun.addedLines.push(change)
-      }
+      currentRun.changes.push(change)
     }
   }
 
@@ -187,124 +182,77 @@ export function collectEditRuns(changes: AnyLineChange[]): EditRun[] {
 }
 
 /**
- * Check if a run is a pure insertion (no deleted lines).
+ * Check if a run is a pure insertion (only added lines).
  */
 function isPureInsertion(run: EditRun): boolean {
-  return run.deletedLines.length === 0
+  return run.changes.every(isAddedLine)
 }
 
 /**
- * Check if a run is a pure deletion (no added lines).
+ * Check if a run is a pure deletion (only deleted lines).
  */
 function isPureDeletion(run: EditRun): boolean {
-  return run.addedLines.length === 0 && run.deletedLines.length > 0
+  return run.changes.every(isDeletedLine)
 }
 
 /**
- * Build a single suggestion for two neighboring runs that move content past
- * one unchanged line: one run purely deletes lines, the other purely inserts
- * identical content, with exactly one unchanged line between them (they share
- * the same context object). Linters produce this pattern when inserting a
- * blank line before existing content. Merging keeps the move atomic — applied
- * separately, the deletion alone would drop the moved content.
+ * Build the suggestion draft for a contiguous slice of hunk changes: the
+ * anchored range is the slice's before-file lines (deleted and unchanged),
+ * and the body is the slice's after-file content (added and unchanged lines,
+ * in diff order). Every draft this action produces is an instance of this
+ * rule, which is what guarantees a suggestion applies to exactly the
+ * after-file content of its range.
  *
- * The body is the after-side content of the merged span taken verbatim from
- * the diff, so unlike heuristic movement detection this cannot corrupt
- * content: a merged suggestion always applies to the same result as the two
- * runs applied separately.
- *
- * Returns null when the runs do not form such a move.
+ * Returns null when the slice contains no before-file line to anchor.
  */
-function buildMoveDraft(
+function draftForSlice(
   path: string,
-  runA: EditRun,
-  runB: EditRun
+  slice: (AddedLine | DeletedLine | UnchangedLine)[]
 ): ReviewCommentDraft | null {
-  const between = runA.followingContext
-  if (!between || between !== runB.precedingContext) return null
+  const beforeLines = slice.filter(
+    (change): change is DeletedLine | UnchangedLine =>
+      isDeletedLine(change) || isUnchangedLine(change)
+  )
+  const firstBefore = beforeLines.at(0)
+  const lastBefore = beforeLines.at(-1)
+  if (!firstBefore || !lastBefore) return null
 
-  const deleteRun = isPureDeletion(runA) ? runA : isPureDeletion(runB) ? runB : null
-  const insertRun = isPureInsertion(runA) ? runA : isPureInsertion(runB) ? runB : null
-  if (!deleteRun || !insertRun) return null
-
-  const deletedContent = deleteRun.deletedLines.map((line) => line.content)
-  const addedContent = insertRun.addedLines.map((line) => line.content)
-  const isSameContent =
-    deletedContent.length === addedContent.length &&
-    deletedContent.every((content, i) => content === addedContent[i])
-  if (!isSameContent) return null
-
-  const firstDeleted = deleteRun.deletedLines.at(0)
-  const lastDeleted = deleteRun.deletedLines.at(-1)
-  if (!firstDeleted || !lastDeleted) return null
-
-  // The merged span covers the deleted lines and the unchanged line between
-  // the runs; its after-side content is that line and the added lines, in
-  // diff order (content moving down past the line, or up ahead of it).
-  const movesDown = deleteRun === runA
-  const body = movesDown
-    ? [between.content, ...addedContent]
-    : [...addedContent, between.content]
-  const startLine = movesDown ? firstDeleted.lineBefore : between.lineBefore
-  const endLine = movesDown ? between.lineBefore : lastDeleted.lineBefore
+  const body = slice
+    .filter((change) => isAddedLine(change) || isUnchangedLine(change))
+    .map((change) => change.content)
 
   return {
     path,
     body: createSuggestion(body.join('\n')),
-    line: endLine,
-    start_line: startLine,
-    start_side: 'RIGHT' as const,
+    line: lastBefore.lineBefore,
+    ...(firstBefore.lineBefore !== lastBefore.lineBefore && {
+      start_line: firstBefore.lineBefore,
+      start_side: 'RIGHT' as const,
+    }),
   }
 }
 
 /**
- * Build a review comment draft for an edit run.
+ * Build a review comment draft for a single edit run.
  *
- * Runs with deletions replace exactly the deleted line range with the added
- * content (empty suggestion for pure deletions). Pure insertions cannot
- * target zero lines on GitHub, so they anchor one adjacent existing line and
- * include its content in the body: the line before the insertion point by
- * default, or the line after it when the insertion is at the top of the file.
- * Returns null when there is no existing line to anchor (empty before-file).
+ * Runs with deletions anchor exactly the deleted lines. Pure insertions
+ * cannot target zero lines on GitHub, so they widen the slice by one
+ * adjacent unchanged line, whose content the body then preserves: the line
+ * before the insertion point by default, or the line after it when the
+ * insertion is at the top of the file. Returns null when there is no
+ * existing line to anchor (empty before-file).
  */
 function buildCommentDraft(
   path: string,
   run: EditRun
 ): ReviewCommentDraft | null {
-  const addedContent = run.addedLines.map((line) => line.content)
-
-  const firstDeleted = run.deletedLines.at(0)
-  const lastDeleted = run.deletedLines.at(-1)
-  if (firstDeleted && lastDeleted) {
-    return {
-      path,
-      body: createSuggestion(addedContent.join('\n')),
-      line: lastDeleted.lineBefore,
-      ...(run.deletedLines.length > 1 && {
-        start_line: firstDeleted.lineBefore,
-        start_side: 'RIGHT' as const,
-      }),
-    }
-  }
+  if (!isPureInsertion(run)) return draftForSlice(path, run.changes)
 
   if (run.precedingContext) {
-    return {
-      path,
-      body: createSuggestion(
-        [run.precedingContext.content, ...addedContent].join('\n')
-      ),
-      line: run.precedingContext.lineBefore,
-    }
+    return draftForSlice(path, [run.precedingContext, ...run.changes])
   }
-
   if (run.followingContext) {
-    return {
-      path,
-      body: createSuggestion(
-        [...addedContent, run.followingContext.content].join('\n')
-      ),
-      line: run.followingContext.lineBefore,
-    }
+    return draftForSlice(path, [...run.changes, run.followingContext])
   }
 
   debug(
@@ -314,17 +262,46 @@ function buildCommentDraft(
 }
 
 /**
- * Build review comment drafts for all edit runs in a hunk.
+ * Merge two runs separated by exactly one unchanged line (they share the
+ * same context object) into a single draft covering both, in two cases:
  *
- * Neighboring runs are merged into a single suggestion in two cases:
+ * - Adjacent-line moves: one run purely deletes lines, the other purely
+ *   inserts identical content — the pattern linters produce when inserting
+ *   a blank line before existing content. Merging keeps the move atomic;
+ *   applied separately, the deletion alone would drop the moved content.
+ * - Anchor collisions: an insertion at the top of the file falls back to
+ *   anchoring its following context line, which the insertion right after
+ *   that line anchors too. Merging avoids two suggestions for one line.
  *
- * - Adjacent-line moves (see buildMoveDraft), so the move is applied
- *   atomically instead of as a deletion and an insertion.
- * - An anchor collision: an insertion at the top of the file anchors line 1
- *   via its following context line, and an insertion right after line 1
- *   anchors that same line. The runs are merged (added lines, then line 1's
- *   content, then the other run's added lines) so the review does not
- *   contain two suggestions for one line.
+ * Returns null when the runs do not qualify.
+ */
+function tryMergeRuns(
+  path: string,
+  runA: EditRun,
+  runB: EditRun
+): ReviewCommentDraft | null {
+  const between = runA.followingContext
+  if (!between || between !== runB.precedingContext) return null
+
+  const bothChanges = [...runA.changes, ...runB.changes]
+  const deletedContent = bothChanges.filter(isDeletedLine).map((c) => c.content)
+  const addedContent = bothChanges.filter(isAddedLine).map((c) => c.content)
+  const isIdenticalMove =
+    ((isPureDeletion(runA) && isPureInsertion(runB)) ||
+      (isPureInsertion(runA) && isPureDeletion(runB))) &&
+    deletedContent.length === addedContent.length &&
+    deletedContent.every((content, i) => content === addedContent[i])
+
+  const anchorsCollide =
+    isPureInsertion(runA) && !runA.precedingContext && isPureInsertion(runB)
+
+  if (!isIdenticalMove && !anchorsCollide) return null
+  return draftForSlice(path, [...runA.changes, between, ...runB.changes])
+}
+
+/**
+ * Build review comment drafts for all edit runs in a hunk, merging
+ * neighboring runs when they qualify (see tryMergeRuns).
  */
 function buildCommentDraftsForHunk(
   path: string,
@@ -338,33 +315,9 @@ function buildCommentDraftsForHunk(
     if (!run) continue
 
     const nextRun = runs[i + 1]
-
-    const moveDraft = nextRun && buildMoveDraft(path, run, nextRun)
-    if (moveDraft) {
-      drafts.push(moveDraft)
-      i++
-      continue
-    }
-
-    if (
-      isPureInsertion(run) &&
-      !run.precedingContext &&
-      run.followingContext &&
-      nextRun &&
-      isPureInsertion(nextRun) &&
-      nextRun.precedingContext === run.followingContext
-    ) {
-      drafts.push({
-        path,
-        body: createSuggestion(
-          [
-            ...run.addedLines.map((line) => line.content),
-            run.followingContext.content,
-            ...nextRun.addedLines.map((line) => line.content),
-          ].join('\n')
-        ),
-        line: run.followingContext.lineBefore,
-      })
+    const merged = nextRun && tryMergeRuns(path, run, nextRun)
+    if (merged) {
+      drafts.push(merged)
       i++
       continue
     }
@@ -685,12 +638,7 @@ export async function run({
     comments: initialComments,
   })
   if (!comments.length) {
-    return {
-      comments: [],
-      reviewCreated: false,
-      suggestionsPosted: 0,
-      suggestionsRemaining: 0,
-    }
+    return { comments: [], reviewCreated: false, suggestionsRemaining: 0 }
   }
 
   const reviewComments = comments.slice(0, MAX_COMMENTS_PER_REVIEW)
@@ -719,7 +667,6 @@ export async function run({
   return {
     comments: reviewComments,
     reviewCreated: true,
-    suggestionsPosted: reviewComments.length,
     suggestionsRemaining: comments.length - reviewComments.length,
   }
 }
@@ -764,14 +711,13 @@ async function main() {
   const pull_number = Number(eventPayload.pull_request.number)
   const commit_id = eventPayload.pull_request.head.sha
 
-  const pullRequestFiles = (
-    await octokit.paginate(octokit.pulls.listFiles, {
-      owner,
-      repo,
-      pull_number,
-      per_page: 100,
-    })
-  ).map((file: PullRequestFile) => file.filename)
+  // The per-page map keeps only filenames instead of accumulating full file
+  // objects (including patch text) across thousands of files.
+  const pullRequestFiles: string[] = await octokit.paginate(
+    octokit.pulls.listFiles,
+    { owner, repo, pull_number, per_page: 100 },
+    (response) => response.data.map((file: PullRequestFile) => file.filename)
+  )
 
   // Get the diff between the head branch and the base branch (limit to the files in the pull request)
   const diff = await getGitDiff(['--', ...pullRequestFiles])
@@ -797,7 +743,7 @@ async function main() {
     event,
     body,
   })
-  setSuggestionOutputs(result.suggestionsPosted, result.suggestionsRemaining)
+  setSuggestionOutputs(result.comments.length, result.suggestionsRemaining)
 }
 
 // pathToFileURL handles Windows paths (drive letters, backslashes), which a

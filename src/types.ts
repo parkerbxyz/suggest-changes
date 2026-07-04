@@ -35,10 +35,10 @@ export interface ReviewCommentDraft extends ReviewCommentInput {
 }
 
 // A maximal sequence of consecutive added/deleted lines within a hunk,
-// with the unchanged lines immediately before and after it (when present)
+// in diff order, with the unchanged lines immediately before and after it
+// (when present)
 export interface EditRun {
-  deletedLines: DeletedLine[]
-  addedLines: AddedLine[]
+  changes: (AddedLine | DeletedLine)[]
   precedingContext: UnchangedLine | undefined
   followingContext: UnchangedLine | undefined
 }
@@ -55,11 +55,11 @@ export interface RunConfig {
   body: string
 }
 
-// Action run result
+// Action run result. The posted count is comments.length; suggestionsRemaining
+// counts suggestions deferred past the per-review comment limit.
 export interface RunResult {
   comments: ReviewCommentDraft[]
   reviewCreated: boolean
-  suggestionsPosted: number
   suggestionsRemaining: number
 }
 
