@@ -1,4 +1,11 @@
-import { debug, getInput, info, setFailed, warning } from '@actions/core'
+import {
+  debug,
+  getInput,
+  info,
+  setFailed,
+  setOutput,
+  warning,
+} from '@actions/core'
 import { getExecOutput } from '@actions/exec'
 import { Octokit } from '@octokit/action'
 
@@ -602,7 +609,12 @@ export async function run({
     comments: initialComments,
   })
   if (!comments.length) {
-    return { comments: [], reviewCreated: false }
+    return {
+      comments: [],
+      reviewCreated: false,
+      suggestionsPosted: 0,
+      suggestionsRemaining: 0,
+    }
   }
 
   const reviewComments = comments.slice(0, MAX_COMMENTS_PER_REVIEW)
@@ -628,7 +640,20 @@ export async function run({
   info(
     `Review created successfully with ${reviewComments.length} suggestion(s).`
   )
-  return { comments: reviewComments, reviewCreated: true }
+  return {
+    comments: reviewComments,
+    reviewCreated: true,
+    suggestionsPosted: reviewComments.length,
+    suggestionsRemaining: comments.length - reviewComments.length,
+  }
+}
+
+/**
+ * Publish the run's suggestion counts as action outputs.
+ */
+function setSuggestionOutputs(posted: number, remaining: number): void {
+  setOutput('suggestions-posted', posted)
+  setOutput('suggestions-remaining', remaining)
 }
 
 // Main entrypoint (only when executed directly)
@@ -686,7 +711,17 @@ async function main() {
   const event = eventInput as ReviewEvent
   const body = getInput('comment') || ''
 
-  await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body })
+  const result = await run({
+    octokit,
+    owner,
+    repo,
+    pull_number,
+    commit_id,
+    diff,
+    event,
+    body,
+  })
+  setSuggestionOutputs(result.suggestionsPosted, result.suggestionsRemaining)
 }
 
 // pathToFileURL handles Windows paths (drive letters, backslashes), which a
@@ -699,6 +734,7 @@ if (
     if (isRateLimitError(err)) {
       warning(`GitHub API rate limit exceeded: ${err.message}`)
       warnRateLimitReset(err)
+      setSuggestionOutputs(0, 0)
       return
     }
     setFailed(err instanceof Error ? err.message : String(err))

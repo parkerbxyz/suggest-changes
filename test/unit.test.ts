@@ -146,6 +146,8 @@ describe('Unit Tests', () => {
       assert.deepStrictEqual(result, {
         comments: [],
         reviewCreated: false,
+        suggestionsPosted: 0,
+        suggestionsRemaining: 0,
       })
     })
 
