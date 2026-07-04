@@ -2,22 +2,7 @@ import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import parseGitDiff from 'parse-git-diff'
 import { createSuggestion, generateReviewComments } from '../src/index.ts'
-
-/**
- * Build a diff string for a single file from hunk lines.
- * @param {string[]} hunkLines - Hunk header and content lines
- * @returns {string} A complete git diff for file.md
- */
-function makeDiff(hunkLines) {
-  return [
-    'diff --git a/file.md b/file.md',
-    'index 0000001..0000002 100644',
-    '--- a/file.md',
-    '+++ b/file.md',
-    ...hunkLines,
-    '',
-  ].join('\n')
-}
+import { applySuggestions, makeDiff } from './helpers.ts'
 
 /**
  * Generate review comments for a raw diff string.
@@ -26,39 +11,6 @@ function makeDiff(hunkLines) {
  */
 function suggestionsFor(diff) {
   return generateReviewComments(parseGitDiff(diff))
-}
-
-/**
- * Apply a single suggestion to file content (same semantics as GitHub).
- * @param {string} content - The original file content
- * @param {import('../src/types').ReviewCommentDraft} suggestion - The suggestion to apply
- * @returns {string} The content with the suggestion applied
- */
-function applySuggestion(content, suggestion) {
-  const lines = content.split('\n')
-  const match = suggestion.body.match(/^````suggestion\n([\s\S]*)\n````$/)
-  if (!match) throw new Error(`Invalid suggestion body: ${suggestion.body}`)
-  const suggestionLines = match[1] === '' ? [] : match[1].split('\n')
-  const startIndex = (suggestion.start_line ?? suggestion.line) - 1
-  const endIndex = suggestion.line - 1
-  return [
-    ...lines.slice(0, startIndex),
-    ...suggestionLines,
-    ...lines.slice(endIndex + 1),
-  ].join('\n')
-}
-
-/**
- * Apply suggestions bottom-up so earlier applications do not shift line numbers.
- * @param {string} content - The original file content
- * @param {Array<import('../src/types').ReviewCommentDraft>} suggestions
- * @returns {string} The content with all suggestions applied
- */
-function applySuggestions(content, suggestions) {
-  const ordered = [...suggestions].sort(
-    (a, b) => (b.start_line ?? b.line) - (a.start_line ?? a.line)
-  )
-  return ordered.reduce(applySuggestion, content)
 }
 
 describe('Edit run suggestions', () => {

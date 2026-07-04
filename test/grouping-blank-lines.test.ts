@@ -2,22 +2,7 @@ import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import parseGitDiff from 'parse-git-diff'
 import { createSuggestion, generateReviewComments } from '../src/index.ts'
-
-/**
- * Build a diff string for a single file from hunk lines.
- * @param {string[]} hunkLines - Hunk header and content lines
- * @returns {string} A complete git diff for file.md
- */
-function makeDiff(hunkLines) {
-  return [
-    'diff --git a/file.md b/file.md',
-    'index 0000001..0000002 100644',
-    '--- a/file.md',
-    '+++ b/file.md',
-    ...hunkLines,
-    '',
-  ].join('\n')
-}
+import { makeDiff } from './helpers.ts'
 
 // Tests for blank line insertions
 // When linters add blank lines, each insertion should become its own clear,
