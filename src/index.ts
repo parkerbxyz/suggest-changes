@@ -10,10 +10,8 @@ import type {
   AddedLine,
   AnyLineChange,
   DeletedLine,
-  FilteredChanges,
+  EditRun,
   GetReviewComment,
-  LineMovement,
-  LinePosition,
   LogOptions,
   PartitionResult,
   PullRequestEvent,
@@ -23,7 +21,6 @@ import type {
   ReviewEvent,
   RunConfig,
   RunResult,
-  SuggestionBody,
   UnchangedLine,
 } from './types'
 
@@ -140,340 +137,159 @@ function warnRateLimitReset(err: RequestErrorLike): void {
 }
 
 /**
- * Filter changes by type for easier processing
+ * Segment a hunk's changes into edit runs: maximal sequences of consecutive
+ * added/deleted lines. Each run is one minimal contiguous edit and maps to
+ * exactly one suggestion. The unchanged lines immediately before and after
+ * each run are recorded so pure insertions can anchor an existing line
+ * (the diff is generated with --unified=1, so a context line is present
+ * except at file boundaries). Marker lines such as "\ No newline at end of
+ * file" are ignored and do not interrupt a run.
  */
-const filterChangesByType = (changes: AnyLineChange[]): FilteredChanges => ({
-  addedLines: changes.filter(isAddedLine),
-  deletedLines: changes.filter(isDeletedLine),
-  unchangedLines: changes.filter(isUnchangedLine),
-})
+export function collectEditRuns(changes: AnyLineChange[]): EditRun[] {
+  const runs: EditRun[] = []
+  let currentRun: EditRun | null = null
+  let lastContext: UnchangedLine | undefined
 
-/**
- * Check if group matches pattern: first is unchanged, rest are all added lines.
- * This pattern indicates blank line insertions after content lines.
- */
-function isUnchangedFollowedByAdded(group: AnyLineChange[]): boolean {
-  const first = group[0]
-  return (
-    group.length > 0 &&
-    first !== undefined &&
-    isUnchangedLine(first) &&
-    group.slice(1).every(isAddedLine)
-  )
-}
-
-/**
- * Check if two changes represent a line movement (same content, different positions).
- */
-function isContentMovement(deleted: DeletedLine, added: AddedLine): boolean {
-  return deleted.content === added.content
-}
-
-/**
- * Detect if changes contain a line movement pattern (deletion + addition of same content).
- * Returns the deleted and added lines if a movement is detected, null otherwise.
- */
-function detectLineMovement(
-  changes: AnyLineChange[]
-): LineMovement | null {
-  const { deletedLines, addedLines } = filterChangesByType(changes)
-
-  if (deletedLines.length === 1 && addedLines.length === 1) {
-    const deleted = deletedLines[0]
-    const added = addedLines[0]
-    if (deleted && added && isContentMovement(deleted, added)) {
-      return { deleted, added }
-    }
-  }
-
-  return null
-}
-
-/**
- * Detect if the group contains a line movement pattern where content is deleted
- * and re-added at a different location (typically to insert blank lines).
- * Pattern: [..., Deleted line, Unchanged line(s), upcoming Added line with same content]
- */
-function isLineMovement(
-  currentGroup: AnyLineChange[],
-  nextChange: AnyLineChange
-): boolean {
-  // Check if nextChange is an added line
-  if (!isAddedLine(nextChange)) return false
-
-  // Look for a deleted line in the current group
-  const deletedLine = currentGroup.find(isDeletedLine)
-  if (!deletedLine) return false
-
-  // Check if the deleted and added lines have the same content
-  // This indicates the line is being moved, not changed
-  return isContentMovement(deletedLine, nextChange)
-}
-
-/**
- * Check if current group should be closed for blank line insertion pattern.
- * Pattern: [Unchanged, Added...] followed by another Unchanged.
- * This helps create clean [Unchanged, Added] pairs for blank line insertions.
- */
-function shouldSplitForBlankLineInsertion(
-  currentGroup: AnyLineChange[],
-  nextChange: AnyLineChange
-): boolean {
-  return isUnchangedFollowedByAdded(currentGroup) && isUnchangedLine(nextChange)
-}
-
-/**
- * Find the line number of the last added or deleted line (excluding unchanged lines).
- * Used to detect gaps between changes for proper grouping.
- */
-function getLastChangedLineNumber(group: AnyLineChange[]): number | null {
-  const lastChange = group.findLast((c) => isDeletedLine(c) || isAddedLine(c))
-  if (!lastChange) return null
-  return isDeletedLine(lastChange)
-    ? lastChange.lineBefore
-    : lastChange.lineAfter
-}
-
-/**
- * Group changes into logical suggestion groups based on line proximity.
- *
- * Groups contiguous or nearly contiguous changes together to create logical
- * suggestions that make sense when reviewing code. Unchanged lines are included
- * for context but don't affect contiguity calculations.
- *
- * Special case for blank line insertions (https://github.com/parkerbxyz/suggest-changes/issues/118):
- * When linters add blank lines, we get patterns like [Unchanged, Add(""), Unchanged, Add(""), ...].
- * We split these into separate [Unchanged, Add("")] pairs to create intuitive suggestions
- * that show adding a blank line after each content line, rather than confusing multi-line groups.
- *
- * Special case for line movements:
- * When a line is deleted and re-added at a different location (e.g., to insert blank lines before it),
- * we keep the deletion and addition in the same group to avoid creating separate delete/add suggestions.
- */
-export function groupChangesForSuggestions(
-  changes: AnyLineChange[]
-): AnyLineChange[][] {
-  if (changes.length === 0) return []
-
-  const groups: AnyLineChange[][] = []
-  let currentGroup: AnyLineChange[] = []
-
-  for (let i = 0; i < changes.length; i++) {
-    const change = changes[i]
-    if (!change) continue
-
-    // Check if we should split the group for blank line insertion pattern
-    if (shouldSplitForBlankLineInsertion(currentGroup, change)) {
-      groups.push(currentGroup)
-      currentGroup = [change]
-      continue
-    }
-
-    // Determine line number for gap detection
-    const lineNumber = isDeletedLine(change)
-      ? change.lineBefore
-      : isAddedLine(change)
-      ? change.lineAfter
-      : isUnchangedLine(change)
-      ? change.lineBefore
-      : null
-
-    if (lineNumber === null) continue
-
-    // Get the last changed line number (ignoring unchanged lines)
-    const lastChangedLineNumber = getLastChangedLineNumber(currentGroup)
-
-    // Check if this looks like a line movement before applying gap detection
-    const appearsToBeLineMovement = isLineMovement(currentGroup, change)
-
-    // Start new group if there's a line gap between actual changes (not unchanged lines)
-    // BUT: Don't split if this appears to be a line movement (delete + re-add same content)
-    if (
-      !isUnchangedLine(change) &&
-      lastChangedLineNumber !== null &&
-      lineNumber > lastChangedLineNumber + 1 &&
-      !appearsToBeLineMovement
-    ) {
-      groups.push(currentGroup)
-      currentGroup = []
-    }
-
-    currentGroup.push(change)
-  }
-
-  if (currentGroup.length > 0) groups.push(currentGroup)
-
-  return groups
-}
-
-/**
- * Helper function to determine if context line comes before added lines.
- */
-const getContextLineComesFirst = (
-  unchangedLines: UnchangedLine[],
-  addedLines: AddedLine[]
-): boolean => {
-  const firstUnchanged = unchangedLines[0]
-  const firstAdded = addedLines[0]
-  if (!firstUnchanged || !firstAdded) return false
-  return firstUnchanged.lineAfter < firstAdded.lineAfter
-}
-
-/**
- * Determine the anchor line for pure additions with context.
- */
-function getAnchorForAdditions(
-  firstUnchangedLine: UnchangedLine,
-  unchangedLines: UnchangedLine[],
-  addedLines: AddedLine[]
-): number {
-  if (getContextLineComesFirst(unchangedLines, addedLines)) {
-    return firstUnchangedLine.lineBefore // Context comes first: anchor to it
-  }
-  return Math.max(1, firstUnchangedLine.lineBefore - 1) // Context comes after: anchor to line before it
-}
-
-/**
- * Generate suggestion body and line count for a group of changes
- */
-export function generateSuggestionBody(
-  changes: AnyLineChange[]
-): SuggestionBody | null {
-  const { addedLines, deletedLines, unchangedLines } =
-    filterChangesByType(changes)
-
-  // Detect line movement: deletion and addition of same content.
-  // This happens when linters move lines to insert blank lines before them.
-  // Example: Line "foo" at position 5 is deleted and re-added at position 3.
-  // Without this special handling, we'd suggest "replace 'foo' with 'foo'" (confusing no-op).
-  // Instead, we suggest inserting a blank line before the moved content.
-  const movement = detectLineMovement(changes)
-  if (movement) {
-    const { deleted } = movement
-
-    // Find the unchanged line before the deletion (context line)
-    const unchangedBeforeDeletion = unchangedLines.find(
-      (u) => u.lineBefore < deleted.lineBefore
-    )
-
-    if (unchangedBeforeDeletion) {
-      // Count unchanged blank lines after the deleted line in the original file.
-      // When the line moves up, these blanks end up after it in the new position.
-      // To avoid consecutive blanks, we keep N-1 of them (removing one redundant blank).
-      const blanksAfterDeletion = unchangedLines.filter(
-        (u) => u.lineBefore > deleted.lineBefore && u.content === ''
-      )
-
-      // Build suggestion to show what the final state should be:
-      // 1. Context line (unchanged before deletion)
-      // 2. New blank line (being inserted)
-      // 3. Moved content line
-      // 4. Keep N-1 of the existing trailing blanks to maintain the same total number of blanks
-      //    (we're adding 1 new blank, so we keep N-1 existing ones to avoid increasing the total)
-      const suggestionLines = [
-        unchangedBeforeDeletion.content,
-        '',
-        deleted.content,
-      ]
-
-      // Keep only N-1 existing blanks by skipping the first (index 0) using slice(1)
-      // This maintains the same total blank line count after inserting the new blank
-      blanksAfterDeletion.slice(1).forEach(() => suggestionLines.push(''))
-
-      // Calculate total lines being replaced in the suggestion:
-      // - 1 unchanged context line
-      // - 1 deleted/moved line
-      // - N trailing blank lines after deletion
-      const totalReplacedLines = 1 + 1 + blanksAfterDeletion.length
-
-      return {
-        body: createSuggestion(suggestionLines.join('\n')),
-        lineCount: totalReplacedLines,
+  for (const change of changes) {
+    if (isUnchangedLine(change)) {
+      if (currentRun) {
+        currentRun.followingContext = change
+        currentRun = null
+      }
+      lastContext = change
+    } else if (isAddedLine(change) || isDeletedLine(change)) {
+      if (!currentRun) {
+        currentRun = {
+          deletedLines: [],
+          addedLines: [],
+          precedingContext: lastContext,
+          followingContext: undefined,
+        }
+        runs.push(currentRun)
+      }
+      if (isDeletedLine(change)) {
+        currentRun.deletedLines.push(change)
+      } else {
+        currentRun.addedLines.push(change)
       }
     }
   }
 
-  // No additions means no content to suggest, except for pure deletions (empty replacement block)
-  if (addedLines.length === 0) {
-    if (deletedLines.length === 0) return null
-    return { body: createSuggestion(''), lineCount: deletedLines.length }
-  }
-
-  // Pure additions: include context if available
-  if (deletedLines.length === 0) {
-    const contextLineComesFirst = getContextLineComesFirst(
-      unchangedLines,
-      addedLines
-    )
-
-    const firstUnchanged = unchangedLines[0]
-    const suggestionLines = contextLineComesFirst && firstUnchanged
-      ? [firstUnchanged.content, ...addedLines.map((line) => line.content)]
-      : addedLines.map((line) => line.content)
-
-    // lineCount represents the number of existing (anchor) lines being replaced,
-    // not the number of lines in the suggestion body (which can include context plus additions).
-    return {
-      body: createSuggestion(suggestionLines.join('\n')),
-      lineCount: contextLineComesFirst ? 1 : addedLines.length,
-    }
-  }
-
-  // Mixed changes: replace deleted content with added content
-  const suggestionLines = addedLines.map((line) => line.content)
-  return {
-    body: createSuggestion(suggestionLines.join('\n')),
-    lineCount: deletedLines.length,
-  }
+  return runs
 }
 
 /**
- * Calculate line positioning for GitHub review comments.
+ * Check if a run is a pure insertion (no deleted lines).
  */
-export function calculateLinePosition(
-  groupChanges: AnyLineChange[],
-  lineCount: number,
-  fromFileRange: { start: number }
-): LinePosition {
-  const { addedLines, unchangedLines } =
-    filterChangesByType(groupChanges)
+function isPureInsertion(run: EditRun): boolean {
+  return run.deletedLines.length === 0
+}
 
-  // Try to find the best target line in order of preference
-  const firstDeletedLine = groupChanges.find(isDeletedLine)
-  const firstUnchangedLine =
-    unchangedLines.length > 0 ? unchangedLines[0] : undefined
+/**
+ * Build a review comment draft for an edit run.
+ *
+ * Runs with deletions replace exactly the deleted line range with the added
+ * content (empty suggestion for pure deletions). Pure insertions cannot
+ * target zero lines on GitHub, so they anchor one adjacent existing line and
+ * include its content in the body: the line before the insertion point by
+ * default, or the line after it when the insertion is at the top of the file.
+ * Returns null when there is no existing line to anchor (empty before-file).
+ */
+function buildCommentDraft(
+  path: string,
+  run: EditRun
+): ReviewCommentDraft | null {
+  const addedContent = run.addedLines.map((line) => line.content)
 
-  // Log unexpected state: unchanged line present but no added lines
-  if (firstUnchangedLine && addedLines.length === 0 && !firstDeletedLine) {
-    debug(
-      `[BUG] Unexpected state: firstUnchangedLine present but addedLines.length === 0. ` +
-        `This branch should not be reached. groupChanges: ${JSON.stringify(
-          groupChanges
-        )}`
-    )
+  const firstDeleted = run.deletedLines.at(0)
+  const lastDeleted = run.deletedLines.at(-1)
+  if (firstDeleted && lastDeleted) {
+    return {
+      path,
+      body: createSuggestion(addedContent.join('\n')),
+      line: lastDeleted.lineBefore,
+      ...(run.deletedLines.length > 1 && {
+        start_line: firstDeleted.lineBefore,
+        start_side: 'RIGHT' as const,
+      }),
+    }
   }
 
-  // Check for line movement: if we have deletion and addition of same content,
-  // anchor to the unchanged line before the deletion
-  const movement = detectLineMovement(groupChanges)
-  if (
-    movement &&
-    firstUnchangedLine &&
-    firstUnchangedLine.lineBefore < movement.deleted.lineBefore
-  ) {
-    // Line movement: anchor to the unchanged line before the deletion
-    const startLine = firstUnchangedLine.lineBefore
-    return { startLine, endLine: startLine + lineCount - 1 }
+  if (run.precedingContext) {
+    return {
+      path,
+      body: createSuggestion(
+        [run.precedingContext.content, ...addedContent].join('\n')
+      ),
+      line: run.precedingContext.lineBefore,
+    }
   }
 
-  // Determine anchor line based on the type of change
-  const startLine =
-    firstDeletedLine?.lineBefore ?? // Deletions: use original line
-    (firstUnchangedLine && addedLines.length > 0
-      ? getAnchorForAdditions(firstUnchangedLine, unchangedLines, addedLines) // Pure additions with context
-      : firstUnchangedLine?.lineBefore ?? fromFileRange.start) // Fallback to context line or file range
+  if (run.followingContext) {
+    return {
+      path,
+      body: createSuggestion(
+        [...addedContent, run.followingContext.content].join('\n')
+      ),
+      line: run.followingContext.lineBefore,
+    }
+  }
 
-  return { startLine, endLine: startLine + lineCount - 1 }
+  debug(
+    `Skipping insertion in ${path}: no existing line to anchor a suggestion to (empty file)`
+  )
+  return null
+}
+
+/**
+ * Build review comment drafts for all edit runs in a hunk.
+ *
+ * Handles one anchor collision: an insertion at the top of the file anchors
+ * line 1 via its following context line, and an insertion right after line 1
+ * anchors that same line. Such neighboring runs are merged into a single
+ * suggestion (added lines, then line 1's content, then the other run's added
+ * lines) so the review does not contain two suggestions for one line.
+ */
+function buildCommentDraftsForHunk(
+  path: string,
+  changes: AnyLineChange[]
+): ReviewCommentDraft[] {
+  const runs = collectEditRuns(changes)
+  const drafts: ReviewCommentDraft[] = []
+
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i]
+    if (!run) continue
+
+    const nextRun = runs[i + 1]
+    if (
+      isPureInsertion(run) &&
+      !run.precedingContext &&
+      run.followingContext &&
+      nextRun &&
+      isPureInsertion(nextRun) &&
+      nextRun.precedingContext === run.followingContext
+    ) {
+      drafts.push({
+        path,
+        body: createSuggestion(
+          [
+            ...run.addedLines.map((line) => line.content),
+            run.followingContext.content,
+            ...nextRun.addedLines.map((line) => line.content),
+          ].join('\n')
+        ),
+        line: run.followingContext.lineBefore,
+      })
+      i++
+      continue
+    }
+
+    const draft = buildCommentDraft(path, run)
+    if (draft) drafts.push(draft)
+  }
+
+  return drafts
 }
 
 /**
@@ -485,53 +301,6 @@ export const generateCommentKey = (
   `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${
     comment.body
   }`
-
-/**
- * Lazily iterate over all suggestion groups in a parsed diff.
- * Yields objects containing path, fromFileRange, and group changes.
- */
-function* iterateSuggestionGroups(parsedDiff: ReturnType<typeof parseGitDiff>) {
-  for (const file of parsedDiff.files) {
-    if (file.type !== 'ChangedFile') continue
-    const path = file.path
-    for (const chunk of file.chunks) {
-      if (chunk.type !== 'Chunk') continue
-      const { fromFileRange, changes } = chunk
-      const groups = groupChangesForSuggestions(changes)
-      for (const group of groups) {
-        yield { path, fromFileRange, group }
-      }
-    }
-  }
-}
-
-/**
- * Build a review comment draft from a suggestion group.
- * Returns null if the group does not produce a valid suggestion body.
- */
-function buildCommentDraft(
-  path: string,
-  fromFileRange: { start: number },
-  group: AnyLineChange[]
-): ReviewCommentDraft | null {
-  const suggestion = generateSuggestionBody(group)
-  if (!suggestion) return null
-  const { body, lineCount } = suggestion
-  const { startLine, endLine } = calculateLinePosition(
-    group,
-    lineCount,
-    fromFileRange
-  )
-  return {
-    path,
-    body,
-    line: endLine,
-    ...(lineCount > 1 && {
-      start_line: startLine,
-      start_side: 'RIGHT' as const,
-    }),
-  }
-}
 
 /**
  * Sort comments so batched suggestion application processes lower lines before higher lines.
@@ -575,11 +344,12 @@ export function generateReviewComments(
   existingCommentKeys: Set<string> = new Set()
 ): ReviewCommentDraft[] {
   const drafts: ReviewCommentDraft[] = []
-  for (const { path, fromFileRange, group } of iterateSuggestionGroups(
-    parsedDiff
-  )) {
-    const draft = buildCommentDraft(path, fromFileRange, group)
-    if (draft) drafts.push(draft)
+  for (const file of parsedDiff.files) {
+    if (file.type !== 'ChangedFile') continue
+    for (const chunk of file.chunks) {
+      if (chunk.type !== 'Chunk') continue
+      drafts.push(...buildCommentDraftsForHunk(file.path, chunk.changes))
+    }
   }
 
   // Log all generated suggestions with detailed debug info

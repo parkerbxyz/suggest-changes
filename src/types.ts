@@ -34,29 +34,13 @@ export interface ReviewCommentDraft extends ReviewCommentInput {
   line: number
 }
 
-// Suggestion body with metadata
-export interface SuggestionBody {
-  body: string
-  lineCount: number
-}
-
-// Line positioning for suggestions
-export interface LinePosition {
-  startLine: number
-  endLine: number
-}
-
-// Line movement detection result
-export interface LineMovement {
-  deleted: DeletedLine
-  added: AddedLine
-}
-
-// Filtered change types
-export interface FilteredChanges {
-  addedLines: AddedLine[]
+// A maximal sequence of consecutive added/deleted lines within a hunk,
+// with the unchanged lines immediately before and after it (when present)
+export interface EditRun {
   deletedLines: DeletedLine[]
-  unchangedLines: UnchangedLine[]
+  addedLines: AddedLine[]
+  precedingContext: UnchangedLine | undefined
+  followingContext: UnchangedLine | undefined
 }
 
 // Action run configuration

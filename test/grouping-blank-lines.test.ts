@@ -1,126 +1,109 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
-import { generateSuggestionBody, groupChangesForSuggestions } from '../src/index.ts'
+import parseGitDiff from 'parse-git-diff'
+import { createSuggestion, generateReviewComments } from '../src/index.ts'
 
-// Tests for the grouping algorithm fix for blank line insertions
-// When linters add blank lines, we need to group them properly to create clear suggestions
+/**
+ * Build a diff string for a single file from hunk lines.
+ * @param {string[]} hunkLines - Hunk header and content lines
+ * @returns {string} A complete git diff for file.md
+ */
+function makeDiff(hunkLines) {
+  return [
+    'diff --git a/file.md b/file.md',
+    'index 0000001..0000002 100644',
+    '--- a/file.md',
+    '+++ b/file.md',
+    ...hunkLines,
+    '',
+  ].join('\n')
+}
+
+// Tests for blank line insertions
+// When linters add blank lines, each insertion should become its own clear,
+// single-line-anchored suggestion that preserves the anchored line's content.
 // See https://github.com/parkerbxyz/suggest-changes/issues/118 for more context
-describe('Grouping algorithm for blank line insertions', () => {
-  test('should create separate groups for each unchanged line followed by blank addition', () => {
-    // Simulates adding blank lines after Line A and Line B: Line A (add blank line), Line B (add blank line), Line C
-    /** @type {import('../src/types').AnyLineChange[]} */
-    const changes = [
-      { type: 'UnchangedLine', lineBefore: 1, lineAfter: 1, content: 'Line A' },
-      { type: 'AddedLine', lineAfter: 2, content: '' },
-      { type: 'UnchangedLine', lineBefore: 2, lineAfter: 3, content: 'Line B' },
-      { type: 'AddedLine', lineAfter: 4, content: '' },
-      { type: 'UnchangedLine', lineBefore: 3, lineAfter: 5, content: 'Line C' },
-    ]
+describe('Blank line insertion suggestions', () => {
+  test('should create a separate suggestion for each inserted blank line', () => {
+    // Simulates adding blank lines after Line A and Line B
+    const diff = makeDiff([
+      '@@ -1,3 +1,5 @@',
+      ' Line A',
+      '+',
+      ' Line B',
+      '+',
+      ' Line C',
+    ])
 
-    const groups = groupChangesForSuggestions(changes)
+    const suggestions = generateReviewComments(parseGitDiff(diff))
 
-    assert.strictEqual(groups.length, 3)
+    assert.strictEqual(suggestions.length, 2)
 
-    // Group 1: [Unchanged Line A, Added blank]
-    assert.strictEqual(groups[0].length, 2)
-    assert.strictEqual(groups[0][0].content, 'Line A')
-    assert.strictEqual(groups[0][1].content, '')
+    assert.strictEqual(suggestions[0].line, 1)
+    assert.strictEqual(suggestions[0].start_line, undefined)
+    assert.strictEqual(suggestions[0].body, createSuggestion('Line A\n'))
 
-    // Group 2: [Unchanged Line B, Added blank]
-    assert.strictEqual(groups[1].length, 2)
-    assert.strictEqual(groups[1][0].content, 'Line B')
-    assert.strictEqual(groups[1][1].content, '')
-
-    // Group 3: [Unchanged Line C]
-    assert.strictEqual(groups[2].length, 1)
-    assert.strictEqual(groups[2][0].content, 'Line C')
+    assert.strictEqual(suggestions[1].line, 2)
+    assert.strictEqual(suggestions[1].start_line, undefined)
+    assert.strictEqual(suggestions[1].body, createSuggestion('Line B\n'))
   })
 
-  test('should generate correct suggestions for blank line insertions', () => {
-    /** @type {import('../src/types').AnyLineChange[]} */
-    const changes = [
-      {
-        type: 'UnchangedLine',
-        lineBefore: 1,
-        lineAfter: 1,
-        content: '## Heading',
-      },
-      { type: 'AddedLine', lineAfter: 2, content: '' },
-      {
-        type: 'UnchangedLine',
-        lineBefore: 2,
-        lineAfter: 3,
-        content: 'Paragraph text',
-      },
-    ]
+  test('should anchor a blank line inserted after a heading to the heading', () => {
+    const diff = makeDiff([
+      '@@ -1,2 +1,3 @@',
+      ' ## Heading',
+      '+',
+      ' Paragraph text',
+    ])
 
-    const groups = groupChangesForSuggestions(changes)
+    const suggestions = generateReviewComments(parseGitDiff(diff))
 
-    // First group should suggest "## Heading\n\n"
-    const suggestion1 = generateSuggestionBody(groups[0])
-    assert.ok(suggestion1)
-    assert.match(suggestion1.body, /## Heading/)
-    assert.match(suggestion1.body, /````suggestion/)
-    assert.strictEqual(suggestion1.lineCount, 1)
-
-    // Second group should not generate a suggestion (only unchanged)
-    const suggestion2 = generateSuggestionBody(groups[1])
-    assert.strictEqual(suggestion2, null)
+    assert.strictEqual(suggestions.length, 1)
+    assert.strictEqual(suggestions[0].line, 1)
+    assert.match(suggestions[0].body, /## Heading/)
+    assert.match(suggestions[0].body, /````suggestion/)
   })
 
-  test('should handle multiple blank lines being added', () => {
-    /** @type {import('../src/types').AnyLineChange[]} */
-    const changes = [
-      { type: 'UnchangedLine', lineBefore: 1, lineAfter: 1, content: 'Line A' },
-      { type: 'AddedLine', lineAfter: 2, content: '' },
-      { type: 'AddedLine', lineAfter: 3, content: '' },
-      { type: 'UnchangedLine', lineBefore: 2, lineAfter: 4, content: 'Line B' },
-    ]
+  test('should keep multiple blank lines added at the same spot in one suggestion', () => {
+    const diff = makeDiff([
+      '@@ -1,2 +1,4 @@',
+      ' Line A',
+      '+',
+      '+',
+      ' Line B',
+    ])
 
-    const groups = groupChangesForSuggestions(changes)
+    const suggestions = generateReviewComments(parseGitDiff(diff))
 
-    // Should create: [Unchanged A, Added blank, Added blank], [Unchanged B]
-    assert.strictEqual(groups.length, 2)
-    assert.strictEqual(groups[0].length, 3)
-    assert.strictEqual(groups[1].length, 1)
+    assert.strictEqual(suggestions.length, 1)
+    assert.strictEqual(suggestions[0].line, 1)
+    assert.strictEqual(suggestions[0].body, createSuggestion('Line A\n\n'))
   })
 
-  test('should not split groups when there are deletions', () => {
-    /** @type {import('../src/types').AnyLineChange[]} */
-    const changes = [
-      { type: 'UnchangedLine', lineBefore: 1, lineAfter: 1, content: 'Line A' },
-      { type: 'DeletedLine', lineBefore: 2, content: 'Old line' },
-      { type: 'AddedLine', lineAfter: 2, content: 'New line' },
-      { type: 'UnchangedLine', lineBefore: 3, lineAfter: 3, content: 'Line B' },
-    ]
+  test('should treat a replacement next to context lines as a single replacement suggestion', () => {
+    const diff = makeDiff([
+      '@@ -1,3 +1,3 @@',
+      ' Line A',
+      '-Old line',
+      '+New line',
+      ' Line B',
+    ])
 
-    const groups = groupChangesForSuggestions(changes)
+    const suggestions = generateReviewComments(parseGitDiff(diff))
 
-    // Should not trigger the special blank line logic when there are deletions
-    // The normal grouping logic should apply
-    assert.strictEqual(groups.length, 1)
-    assert.strictEqual(groups[0].length, 4)
+    assert.strictEqual(suggestions.length, 1)
+    assert.strictEqual(suggestions[0].line, 2)
+    assert.strictEqual(suggestions[0].start_line, undefined)
+    assert.strictEqual(suggestions[0].body, createSuggestion('New line'))
   })
 
-  test('should handle blank line at end of file', () => {
-    /** @type {import('../src/types').AnyLineChange[]} */
-    const changes = [
-      {
-        type: 'UnchangedLine',
-        lineBefore: 1,
-        lineAfter: 1,
-        content: 'Last line',
-      },
-      { type: 'AddedLine', lineAfter: 2, content: '' },
-    ]
+  test('should handle a blank line added at end of file', () => {
+    const diff = makeDiff(['@@ -1,1 +1,2 @@', ' Last line', '+'])
 
-    const groups = groupChangesForSuggestions(changes)
+    const suggestions = generateReviewComments(parseGitDiff(diff))
 
-    assert.strictEqual(groups.length, 1)
-    assert.strictEqual(groups[0].length, 2)
-
-    const suggestion = generateSuggestionBody(groups[0])
-    assert.ok(suggestion)
-    assert.match(suggestion.body, /Last line/)
+    assert.strictEqual(suggestions.length, 1)
+    assert.strictEqual(suggestions[0].line, 1)
+    assert.strictEqual(suggestions[0].body, createSuggestion('Last line\n'))
   })
 })
