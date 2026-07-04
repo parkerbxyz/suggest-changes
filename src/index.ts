@@ -194,6 +194,70 @@ function isPureInsertion(run: EditRun): boolean {
 }
 
 /**
+ * Check if a run is a pure deletion (no added lines).
+ */
+function isPureDeletion(run: EditRun): boolean {
+  return run.addedLines.length === 0 && run.deletedLines.length > 0
+}
+
+/**
+ * Build a single suggestion for two neighboring runs that move content past
+ * one unchanged line: one run purely deletes lines, the other purely inserts
+ * identical content, with exactly one unchanged line between them (they share
+ * the same context object). Linters produce this pattern when inserting a
+ * blank line before existing content. Merging keeps the move atomic — applied
+ * separately, the deletion alone would drop the moved content.
+ *
+ * The body is the after-side content of the merged span taken verbatim from
+ * the diff, so unlike heuristic movement detection this cannot corrupt
+ * content: a merged suggestion always applies to the same result as the two
+ * runs applied separately.
+ *
+ * Returns null when the runs do not form such a move.
+ */
+function buildMoveDraft(
+  path: string,
+  runA: EditRun,
+  runB: EditRun
+): ReviewCommentDraft | null {
+  const between = runA.followingContext
+  if (!between || between !== runB.precedingContext) return null
+
+  const deleteRun = isPureDeletion(runA) ? runA : isPureDeletion(runB) ? runB : null
+  const insertRun = isPureInsertion(runA) ? runA : isPureInsertion(runB) ? runB : null
+  if (!deleteRun || !insertRun) return null
+
+  const deletedContent = deleteRun.deletedLines.map((line) => line.content)
+  const addedContent = insertRun.addedLines.map((line) => line.content)
+  const isSameContent =
+    deletedContent.length === addedContent.length &&
+    deletedContent.every((content, i) => content === addedContent[i])
+  if (!isSameContent) return null
+
+  const firstDeleted = deleteRun.deletedLines.at(0)
+  const lastDeleted = deleteRun.deletedLines.at(-1)
+  if (!firstDeleted || !lastDeleted) return null
+
+  // The merged span covers the deleted lines and the unchanged line between
+  // the runs; its after-side content is that line and the added lines, in
+  // diff order (content moving down past the line, or up ahead of it).
+  const movesDown = deleteRun === runA
+  const body = movesDown
+    ? [between.content, ...addedContent]
+    : [...addedContent, between.content]
+  const startLine = movesDown ? firstDeleted.lineBefore : between.lineBefore
+  const endLine = movesDown ? between.lineBefore : lastDeleted.lineBefore
+
+  return {
+    path,
+    body: createSuggestion(body.join('\n')),
+    line: endLine,
+    start_line: startLine,
+    start_side: 'RIGHT' as const,
+  }
+}
+
+/**
  * Build a review comment draft for an edit run.
  *
  * Runs with deletions replace exactly the deleted line range with the added
@@ -252,11 +316,15 @@ function buildCommentDraft(
 /**
  * Build review comment drafts for all edit runs in a hunk.
  *
- * Handles one anchor collision: an insertion at the top of the file anchors
- * line 1 via its following context line, and an insertion right after line 1
- * anchors that same line. Such neighboring runs are merged into a single
- * suggestion (added lines, then line 1's content, then the other run's added
- * lines) so the review does not contain two suggestions for one line.
+ * Neighboring runs are merged into a single suggestion in two cases:
+ *
+ * - Adjacent-line moves (see buildMoveDraft), so the move is applied
+ *   atomically instead of as a deletion and an insertion.
+ * - An anchor collision: an insertion at the top of the file anchors line 1
+ *   via its following context line, and an insertion right after line 1
+ *   anchors that same line. The runs are merged (added lines, then line 1's
+ *   content, then the other run's added lines) so the review does not
+ *   contain two suggestions for one line.
  */
 function buildCommentDraftsForHunk(
   path: string,
@@ -270,6 +338,14 @@ function buildCommentDraftsForHunk(
     if (!run) continue
 
     const nextRun = runs[i + 1]
+
+    const moveDraft = nextRun && buildMoveDraft(path, run, nextRun)
+    if (moveDraft) {
+      drafts.push(moveDraft)
+      i++
+      continue
+    }
+
     if (
       isPureInsertion(run) &&
       !run.precedingContext &&

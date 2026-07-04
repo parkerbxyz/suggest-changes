@@ -77,13 +77,10 @@ exports[`Integration Tests > Suggestion Generation > new-file-issue/default sugg
   },
   {
     "path": "test/fixtures/new-file-issue/before.md",
-    "body": "\`\`\`\`suggestion\\n\\n\`\`\`\`",
-    "line": 4
-  },
-  {
-    "path": "test/fixtures/new-file-issue/before.md",
     "body": "\`\`\`\`suggestion\\n\\nThere should not be multiple consecutive blank lines.\\n\`\`\`\`",
-    "line": 5
+    "line": 5,
+    "start_line": 4,
+    "start_side": "RIGHT"
   },
   {
     "path": "test/fixtures/new-file-issue/before.md",

@@ -266,6 +266,125 @@ describe('Edit run suggestions', () => {
     })
   })
 
+  describe('Adjacent line moves', () => {
+    test('content moving down past a blank line is one atomic suggestion', () => {
+      // The linter blank-line pattern: inserting a blank before a line shows
+      // up as delete line, keep blank, re-add line one position later.
+      const diff = makeDiff([
+        '@@ -1,4 +1,4 @@',
+        ' heading',
+        '-moved line',
+        ' ',
+        '+moved line',
+        ' tail',
+      ])
+
+      const suggestions = suggestionsFor(diff)
+
+      assert.strictEqual(suggestions.length, 1)
+      assert.strictEqual(suggestions[0].start_line, 2)
+      assert.strictEqual(suggestions[0].line, 3)
+      assert.strictEqual(suggestions[0].start_side, 'RIGHT')
+      assert.strictEqual(suggestions[0].body, createSuggestion('\nmoved line'))
+
+      const before = ['heading', 'moved line', '', 'tail'].join('\n')
+      const after = ['heading', '', 'moved line', 'tail'].join('\n')
+      assert.strictEqual(applySuggestions(before, suggestions), after)
+    })
+
+    test('content moving up past its neighbor is one atomic suggestion', () => {
+      const diff = makeDiff([
+        '@@ -1,3 +1,3 @@',
+        ' first',
+        '+third',
+        ' second',
+        '-third',
+      ])
+
+      const suggestions = suggestionsFor(diff)
+
+      assert.strictEqual(suggestions.length, 1)
+      assert.strictEqual(suggestions[0].start_line, 2)
+      assert.strictEqual(suggestions[0].line, 3)
+      assert.strictEqual(suggestions[0].body, createSuggestion('third\nsecond'))
+
+      const before = ['first', 'second', 'third'].join('\n')
+      const after = ['first', 'third', 'second'].join('\n')
+      assert.strictEqual(applySuggestions(before, suggestions), after)
+    })
+
+    test('multiple lines moving together merge into one suggestion', () => {
+      const diff = makeDiff([
+        '@@ -1,5 +1,5 @@',
+        ' x',
+        '-m1',
+        '-m2',
+        ' u',
+        '+m1',
+        '+m2',
+        ' y',
+      ])
+
+      const suggestions = suggestionsFor(diff)
+
+      assert.strictEqual(suggestions.length, 1)
+      assert.strictEqual(suggestions[0].start_line, 2)
+      assert.strictEqual(suggestions[0].line, 4)
+      assert.strictEqual(suggestions[0].body, createSuggestion('u\nm1\nm2'))
+
+      const before = ['x', 'm1', 'm2', 'u', 'y'].join('\n')
+      const after = ['x', 'u', 'm1', 'm2', 'y'].join('\n')
+      assert.strictEqual(applySuggestions(before, suggestions), after)
+    })
+
+    test('identical lines more than one line apart stay separate suggestions', () => {
+      const diff = makeDiff([
+        '@@ -1,5 +1,5 @@',
+        ' a',
+        '-}',
+        ' b',
+        ' c',
+        '+}',
+        ' d',
+      ])
+
+      const suggestions = suggestionsFor(diff)
+
+      assert.strictEqual(suggestions.length, 2)
+      assert.strictEqual(suggestions[0].line, 2)
+      assert.strictEqual(suggestions[0].body, createSuggestion(''))
+      assert.strictEqual(suggestions[1].line, 4)
+      assert.strictEqual(suggestions[1].body, createSuggestion('c\n}'))
+
+      const before = ['a', '}', 'b', 'c', 'd'].join('\n')
+      const after = ['a', 'b', 'c', '}', 'd'].join('\n')
+      assert.strictEqual(applySuggestions(before, suggestions), after)
+    })
+
+    test('differing content one line apart stays separate suggestions', () => {
+      const diff = makeDiff([
+        '@@ -1,4 +1,4 @@',
+        ' a',
+        '-old',
+        ' b',
+        '+new',
+        ' c',
+      ])
+
+      const suggestions = suggestionsFor(diff)
+
+      assert.strictEqual(suggestions.length, 2)
+      assert.strictEqual(suggestions[0].line, 2)
+      assert.strictEqual(suggestions[0].body, createSuggestion(''))
+      assert.strictEqual(suggestions[1].line, 3)
+      assert.strictEqual(suggestions[1].body, createSuggestion('b\nnew'))
+
+      const before = ['a', 'old', 'b', 'c'].join('\n')
+      const after = ['a', 'b', 'new', 'c'].join('\n')
+      assert.strictEqual(applySuggestions(before, suggestions), after)
+    })
+  })
+
   describe('Replacements and deletions', () => {
     test('multi-line replacement anchors exactly the deleted lines', () => {
       const diff = makeDiff([
