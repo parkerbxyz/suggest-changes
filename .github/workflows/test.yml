@@ -19,3 +19,18 @@ jobs:
         run: npm ci
       - name: Run tests
         run: npm test
+
+  verify-dist:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: 'package.json'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Verify dist/ is up to date
+        run: git diff --exit-code dist/
