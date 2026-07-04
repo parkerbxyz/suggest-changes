@@ -35,12 +35,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Check out the pull request head so suggestion line numbers
+          # match the branch being reviewed (see note below)
+          ref: ${{ github.event.pull_request.head.sha }}
 
       # Make some changes to files here
       # (e.g., run a linter or formatter)
 
       - uses: parkerbxyz/suggest-changes@v3
 ```
+
+> [!IMPORTANT]
+> Check out the pull request head (`ref: ${{ github.event.pull_request.head.sha }}`) rather than the default merge ref. By default, `actions/checkout` checks out a merge of the pull request into its base branch; when the base branch has moved since the pull request was created, line numbers in that merge result can differ from the pull request head, causing suggestions to be misplaced or rejected.
 
 ### Complete example
 
@@ -62,6 +69,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: DavidAnson/markdownlint-cli2-action@v20
         id: markdownlint
@@ -129,6 +138,8 @@ jobs:
       contents: read # Needed for actions/checkout
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       # Run your linter or formatter here
       # Example: markdownlint, prettier, eslint --fix, etc.
