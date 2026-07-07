@@ -72748,13 +72748,12 @@ function tryMergeRuns(path, runA, runB) {
     const between = runA.followingContext;
     if (!between || between !== runB.precedingContext)
         return null;
-    const bothChanges = [...runA.changes, ...runB.changes];
-    const deletedContent = bothChanges.filter(isDeletedLine).map((c) => c.content);
-    const addedContent = bothChanges.filter(isAddedLine).map((c) => c.content);
-    const isIdenticalMove = ((isPureDeletion(runA) && isPureInsertion(runB)) ||
-        (isPureInsertion(runA) && isPureDeletion(runB))) &&
-        deletedContent.length === addedContent.length &&
-        deletedContent.every((content, i) => content === addedContent[i]);
+    const deleteRun = isPureDeletion(runA) ? runA : isPureDeletion(runB) ? runB : null;
+    const insertRun = isPureInsertion(runA) ? runA : isPureInsertion(runB) ? runB : null;
+    const isIdenticalMove = deleteRun !== null &&
+        insertRun !== null &&
+        deleteRun.changes.length === insertRun.changes.length &&
+        deleteRun.changes.every((change, i) => change.content === insertRun.changes[i]?.content);
     const anchorsCollide = isPureInsertion(runA) && !runA.precedingContext && isPureInsertion(runB);
     if (!isIdenticalMove && !anchorsCollide)
         return null;
@@ -72889,16 +72888,21 @@ async function fetchCanonicalDiff(octokit, owner, repo, pull_number) {
  * Build a lookup of valid right-side line numbers per file path.
  */
 function buildRightSideAnchors(parsedDiff) {
-    return Object.fromEntries(parsedDiff.files
-        .filter((file) => file.type === 'ChangedFile' || file.type === 'AddedFile')
-        .map((file) => [
-        file.path,
-        new Set(file.chunks
+    return Object.fromEntries(parsedDiff.files.flatMap((file) => {
+        if (file.type !== 'ChangedFile' &&
+            file.type !== 'AddedFile' &&
+            file.type !== 'RenamedFile') {
+            return [];
+        }
+        // Renamed files anchor under their new path
+        const path = file.type === 'RenamedFile' ? file.pathAfter : file.path;
+        const lines = new Set(file.chunks
             .filter((chunk) => chunk.type === 'Chunk')
             .flatMap((chunk) => chunk.changes
             .filter((change) => isAddedLine(change) || isUnchangedLine(change))
-            .map((change) => change.lineAfter))),
-    ]));
+            .map((change) => change.lineAfter)));
+        return [[path, lines]];
+    }));
 }
 /**
  * Determine if a review comment draft is valid within the PR diff.
@@ -72907,10 +72911,12 @@ function isValidSuggestion(comment, anchors) {
     const validLines = anchors[comment.path];
     if (!validLines)
         return false;
-    if (!validLines.has(comment.line))
-        return false;
-    if (comment.start_line !== undefined && !validLines.has(comment.start_line))
-        return false;
+    // GitHub requires the entire commented range to be part of the diff, so
+    // check every line in the range, not just the endpoints.
+    for (let line = comment.start_line ?? comment.line; line <= comment.line; line++) {
+        if (!validLines.has(line))
+            return false;
+    }
     return true;
 }
 /**
@@ -73054,6 +73060,17 @@ async function main() {
     }
     const pull_number = Number(eventPayload.pull_request.number);
     const commit_id = eventPayload.pull_request.head.sha;
+    // A merge-ref checkout has line numbers that can drift from the pull
+    // request head, silently misplacing suggestions or getting them dropped.
+    const localHead = (await getExecOutput('git', ['rev-parse', 'HEAD'], {
+        silent: true,
+        ignoreReturnCode: true,
+    })).stdout.trim();
+    if (localHead && localHead !== commit_id) {
+        warning(`The checked-out commit (${localHead}) is not the pull request head (${commit_id}). ` +
+            'Suggestions may be misplaced or dropped. Check out the pull request head ' +
+            '(actions/checkout with ref: ${{ github.event.pull_request.head.sha }}) — see the README.');
+    }
     // The per-page map keeps only filenames instead of accumulating full file
     // objects (including patch text) across thousands of files.
     const pullRequestFiles = await octokit.paginate(octokit.pulls.listFiles, { owner, repo, pull_number, per_page: 100 }, (response) => response.data.map((file) => file.filename));
