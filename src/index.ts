@@ -283,14 +283,15 @@ function tryMergeRuns(
   const between = runA.followingContext
   if (!between || between !== runB.precedingContext) return null
 
-  const bothChanges = [...runA.changes, ...runB.changes]
-  const deletedContent = bothChanges.filter(isDeletedLine).map((c) => c.content)
-  const addedContent = bothChanges.filter(isAddedLine).map((c) => c.content)
+  const deleteRun = isPureDeletion(runA) ? runA : isPureDeletion(runB) ? runB : null
+  const insertRun = isPureInsertion(runA) ? runA : isPureInsertion(runB) ? runB : null
   const isIdenticalMove =
-    ((isPureDeletion(runA) && isPureInsertion(runB)) ||
-      (isPureInsertion(runA) && isPureDeletion(runB))) &&
-    deletedContent.length === addedContent.length &&
-    deletedContent.every((content, i) => content === addedContent[i])
+    deleteRun !== null &&
+    insertRun !== null &&
+    deleteRun.changes.length === insertRun.changes.length &&
+    deleteRun.changes.every(
+      (change, i) => change.content === insertRun.changes[i]?.content
+    )
 
   const anchorsCollide =
     isPureInsertion(runA) && !runA.precedingContext && isPureInsertion(runB)
