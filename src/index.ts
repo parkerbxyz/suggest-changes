@@ -718,6 +718,22 @@ async function main() {
   const pull_number = Number(eventPayload.pull_request.number)
   const commit_id = eventPayload.pull_request.head.sha
 
+  // A merge-ref checkout has line numbers that can drift from the pull
+  // request head, silently misplacing suggestions or getting them dropped.
+  const localHead = (
+    await getExecOutput('git', ['rev-parse', 'HEAD'], {
+      silent: true,
+      ignoreReturnCode: true,
+    })
+  ).stdout.trim()
+  if (localHead && localHead !== commit_id) {
+    warning(
+      `The checked-out commit (${localHead}) is not the pull request head (${commit_id}). ` +
+        'Suggestions may be misplaced or dropped. Check out the pull request head ' +
+        '(actions/checkout with ref: ${{ github.event.pull_request.head.sha }}) — see the README.'
+    )
+  }
+
   // The per-page map keeps only filenames instead of accumulating full file
   // objects (including patch text) across thousands of files.
   const pullRequestFiles: string[] = await octokit.paginate(
