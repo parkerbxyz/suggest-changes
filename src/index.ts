@@ -460,24 +460,29 @@ function buildRightSideAnchors(
   parsedDiff: ReturnType<typeof parseGitDiff>
 ): Record<string, Set<number>> {
   return Object.fromEntries(
-    parsedDiff.files
-      .filter(
-        (file) => file.type === 'ChangedFile' || file.type === 'AddedFile'
+    parsedDiff.files.flatMap((file) => {
+      if (
+        file.type !== 'ChangedFile' &&
+        file.type !== 'AddedFile' &&
+        file.type !== 'RenamedFile'
+      ) {
+        return []
+      }
+      // Renamed files anchor under their new path
+      const path = file.type === 'RenamedFile' ? file.pathAfter : file.path
+      const lines = new Set(
+        file.chunks
+          .filter((chunk) => chunk.type === 'Chunk')
+          .flatMap((chunk) =>
+            chunk.changes
+              .filter(
+                (change) => isAddedLine(change) || isUnchangedLine(change)
+              )
+              .map((change) => change.lineAfter)
+          )
       )
-      .map((file) => [
-        file.path,
-        new Set(
-          file.chunks
-            .filter((chunk) => chunk.type === 'Chunk')
-            .flatMap((chunk) =>
-              chunk.changes
-                .filter(
-                  (change) => isAddedLine(change) || isUnchangedLine(change)
-                )
-                .map((change) => change.lineAfter)
-            )
-        ),
-      ])
+      return [[path, lines] as const]
+    })
   )
 }
 
@@ -490,9 +495,11 @@ function isValidSuggestion(
 ): boolean {
   const validLines = anchors[comment.path]
   if (!validLines) return false
-  if (!validLines.has(comment.line)) return false
-  if (comment.start_line !== undefined && !validLines.has(comment.start_line))
-    return false
+  // GitHub requires the entire commented range to be part of the diff, so
+  // check every line in the range, not just the endpoints.
+  for (let line = comment.start_line ?? comment.line; line <= comment.line; line++) {
+    if (!validLines.has(line)) return false
+  }
   return true
 }
 

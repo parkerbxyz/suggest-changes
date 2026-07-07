@@ -8,6 +8,7 @@ import {
   run,
   sortCommentsForBatch,
 } from '../src/index.ts'
+import { makeDiff } from './helpers.ts'
 
 describe('Unit Tests', () => {
   describe('generateCommentKey', () => {
@@ -211,6 +212,113 @@ describe('Unit Tests', () => {
           `Should accept valid event type: ${event}`
         )
       }
+    })
+
+    test('should keep suggestions for renamed files in the pull request diff', async () => {
+      // The canonical PR diff reports a renamed-and-edited file as a rename;
+      // its suggestions must anchor under the new path instead of being
+      // filtered out as outside the diff.
+      const localDiff = makeDiff(
+        ['@@ -1,1 +1,1 @@', '-old line', '+new line'],
+        'new.md'
+      )
+      const pullRequestDiff = [
+        'diff --git a/old.md b/new.md',
+        'similarity index 90%',
+        'rename from old.md',
+        'rename to new.md',
+        'index 0000001..0000002 100644',
+        '--- a/old.md',
+        '+++ b/new.md',
+        '@@ -1,1 +1,1 @@',
+        '-old line',
+        '+new line',
+        '',
+      ].join('\n')
+
+      const mockOctokit = {
+        paginate: async () => [],
+        pulls: {
+          listReviewComments: async () => ({ data: [] }),
+          get: async () => ({ data: pullRequestDiff }),
+          createReview: async () => ({ data: { id: 123 } }),
+        },
+      }
+
+      const result = await run({
+        // @ts-expect-error - Test mock doesn't need full Octokit interface
+        octokit: mockOctokit,
+        owner: 'test-owner',
+        repo: 'test-repo',
+        pull_number: 1,
+        commit_id: 'abc123',
+        diff: localDiff,
+        event: 'COMMENT',
+        body: '',
+      })
+
+      assert.strictEqual(result.reviewCreated, true)
+      assert.strictEqual(result.comments.length, 1)
+      assert.strictEqual(result.comments[0].path, 'new.md')
+    })
+
+    test('should drop suggestions whose range crosses lines outside the pull request diff', async () => {
+      // The suggestion spans lines 2-5; the PR diff contains lines 1-2 and
+      // 5-6 but not the interior lines 3-4, so the whole range is invalid
+      // even though both endpoints are anchorable.
+      const localDiff = makeDiff(
+        [
+          '@@ -1,6 +1,2 @@',
+          ' line one',
+          '-line two',
+          '-line three',
+          '-line four',
+          '-line five',
+          ' line six',
+        ],
+        'file.md'
+      )
+      const pullRequestDiff = [
+        'diff --git a/file.md b/file.md',
+        'index 0000001..0000002 100644',
+        '--- a/file.md',
+        '+++ b/file.md',
+        '@@ -1,2 +1,2 @@',
+        ' line one',
+        '-x',
+        '+y',
+        '@@ -5,2 +5,2 @@',
+        ' ctx five',
+        '-a',
+        '+b',
+        '',
+      ].join('\n')
+
+      const mockOctokit = {
+        paginate: async () => [],
+        pulls: {
+          listReviewComments: async () => ({ data: [] }),
+          get: async () => ({ data: pullRequestDiff }),
+          createReview: async () => {
+            throw new Error('createReview must not be called')
+          },
+        },
+      }
+
+      const result = await run({
+        // @ts-expect-error - Test mock doesn't need full Octokit interface
+        octokit: mockOctokit,
+        owner: 'test-owner',
+        repo: 'test-repo',
+        pull_number: 1,
+        commit_id: 'abc123',
+        diff: localDiff,
+        event: 'COMMENT',
+        body: '',
+      })
+
+      assert.strictEqual(result.reviewCreated, false)
+      assert.deepStrictEqual(result.comments, [])
     })
   })
 
