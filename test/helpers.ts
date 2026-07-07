@@ -1,3 +1,5 @@
+import parseGitDiff from 'parse-git-diff'
+import { generateReviewComments } from '../src/index.ts'
 import type { ReviewCommentDraft } from '../src/types.ts'
 
 /**
@@ -12,6 +14,13 @@ export function makeDiff(hunkLines: string[], path = 'file.md'): string {
     ...hunkLines,
     '',
   ].join('\n')
+}
+
+/**
+ * Generate review comments for a raw diff string.
+ */
+export function suggestionsFor(diff: string): ReviewCommentDraft[] {
+  return generateReviewComments(parseGitDiff(diff))
 }
 
 /**

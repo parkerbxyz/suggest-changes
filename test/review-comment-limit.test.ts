@@ -1,6 +1,7 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import { run } from '../src/index.ts'
+import { makeDiff } from './helpers.ts'
 
 type ReviewParams = {
   body: string
@@ -18,11 +19,10 @@ function createMockFiles(count: number): Array<{ path: string }> {
 
 function createMockDiff(files: Array<{ path: string }>): string {
   return files
-    .map(
-      (file, i) =>
-        `diff --git a/${file.path} b/${file.path}\n--- a/${file.path}\n+++ b/${file.path}\n@@ -1,1 +1,1 @@\n-old line ${i}\n+new line ${i}`
+    .map((file, i) =>
+      makeDiff(['@@ -1,1 +1,1 @@', `-old line ${i}`, `+new line ${i}`], file.path)
     )
-    .join('\n')
+    .join('')
 }
 
 function createMockOctokit({
@@ -153,10 +153,8 @@ describe('review comment limit', () => {
 
   test('dedupes duplicate suggestions generated within a single run', async () => {
     // Two diff hunks producing the same path/line/suggestion should collapse to one comment.
-    const diff = [
-      `diff --git a/dup.md b/dup.md\n--- a/dup.md\n+++ b/dup.md\n@@ -1,1 +1,1 @@\n-old\n+new`,
-      `diff --git a/dup.md b/dup.md\n--- a/dup.md\n+++ b/dup.md\n@@ -1,1 +1,1 @@\n-old\n+new`,
-    ].join('\n')
+    const dupDiff = makeDiff(['@@ -1,1 +1,1 @@', '-old', '+new'], 'dup.md')
+    const diff = dupDiff + dupDiff
 
     const created: ReviewParams[] = []
     await run({

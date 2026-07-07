@@ -1,8 +1,7 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
-import parseGitDiff from 'parse-git-diff'
-import { createSuggestion, generateReviewComments } from '../src/index.ts'
-import { makeDiff } from './helpers.ts'
+import { createSuggestion } from '../src/index.ts'
+import { makeDiff, suggestionsFor } from './helpers.ts'
 
 // Tests for blank line insertions
 // When linters add blank lines, each insertion should become its own clear,
@@ -20,7 +19,7 @@ describe('Blank line insertion suggestions', () => {
       ' Line C',
     ])
 
-    const suggestions = generateReviewComments(parseGitDiff(diff))
+    const suggestions = suggestionsFor(diff)
 
     assert.strictEqual(suggestions.length, 2)
 
@@ -41,7 +40,7 @@ describe('Blank line insertion suggestions', () => {
       ' Paragraph text',
     ])
 
-    const suggestions = generateReviewComments(parseGitDiff(diff))
+    const suggestions = suggestionsFor(diff)
 
     assert.strictEqual(suggestions.length, 1)
     assert.strictEqual(suggestions[0].line, 1)
@@ -58,7 +57,7 @@ describe('Blank line insertion suggestions', () => {
       ' Line B',
     ])
 
-    const suggestions = generateReviewComments(parseGitDiff(diff))
+    const suggestions = suggestionsFor(diff)
 
     assert.strictEqual(suggestions.length, 1)
     assert.strictEqual(suggestions[0].line, 1)
@@ -74,7 +73,7 @@ describe('Blank line insertion suggestions', () => {
       ' Line B',
     ])
 
-    const suggestions = generateReviewComments(parseGitDiff(diff))
+    const suggestions = suggestionsFor(diff)
 
     assert.strictEqual(suggestions.length, 1)
     assert.strictEqual(suggestions[0].line, 2)
@@ -85,7 +84,7 @@ describe('Blank line insertion suggestions', () => {
   test('should handle a blank line added at end of file', () => {
     const diff = makeDiff(['@@ -1,1 +1,2 @@', ' Last line', '+'])
 
-    const suggestions = generateReviewComments(parseGitDiff(diff))
+    const suggestions = suggestionsFor(diff)
 
     assert.strictEqual(suggestions.length, 1)
     assert.strictEqual(suggestions[0].line, 1)

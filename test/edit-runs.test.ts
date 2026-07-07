@@ -1,17 +1,7 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
-import parseGitDiff from 'parse-git-diff'
-import { createSuggestion, generateReviewComments } from '../src/index.ts'
-import { applySuggestions, makeDiff } from './helpers.ts'
-
-/**
- * Generate review comments for a raw diff string.
- * @param {string} diff - The diff to process
- * @returns {Array<import('../src/types').ReviewCommentDraft>}
- */
-function suggestionsFor(diff) {
-  return generateReviewComments(parseGitDiff(diff))
-}
+import { createSuggestion } from '../src/index.ts'
+import { applySuggestions, makeDiff, suggestionsFor } from './helpers.ts'
 
 describe('Edit run suggestions', () => {
   describe('Bug 1: pure insertions without leading context must not destroy content', () => {
@@ -71,21 +61,19 @@ describe('Edit run suggestions', () => {
 
   describe('Bug 2: identical delete/add content must not be treated as a movement', () => {
     test('unrelated brace edits produce a deletion and an insertion, not a merged rewrite', () => {
-      const diff = [
-        'diff --git a/file.js b/file.js',
-        'index 0000001..0000002 100644',
-        '--- a/file.js',
-        '+++ b/file.js',
-        '@@ -3,6 +3,6 @@',
-        ' function foo() {',
-        '-}',
-        ' const x = 1',
-        ' if (x) {',
-        '   doThing()',
-        '+}',
-        ' done()',
-        '',
-      ].join('\n')
+      const diff = makeDiff(
+        [
+          '@@ -3,6 +3,6 @@',
+          ' function foo() {',
+          '-}',
+          ' const x = 1',
+          ' if (x) {',
+          '   doThing()',
+          '+}',
+          ' done()',
+        ],
+        'file.js'
+      )
 
       const suggestions = suggestionsFor(diff)
 
