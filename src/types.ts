@@ -22,6 +22,11 @@ export type ReviewCommentInput = NonNullable<
 export type PullRequestFile =
   Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/files']['response']['data'][number]
 
+export type PullRequestFilePatch = Pick<
+  PullRequestFile,
+  'filename' | 'patch' | 'additions' | 'deletions'
+>
+
 export type ReviewEvent = NonNullable<
   Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']
 >
@@ -51,16 +56,15 @@ export interface RunConfig {
   pull_number: number
   commit_id: string
   diff: string
+  pullRequestFiles: PullRequestFilePatch[]
   event: ReviewEvent
   body: string
 }
 
-// Action run result. The posted count is comments.length; suggestionsRemaining
-// counts suggestions deferred past the per-review comment limit.
+// Action run result
 export interface RunResult {
   comments: ReviewCommentDraft[]
   reviewCreated: boolean
-  suggestionsRemaining: number
 }
 
 // Partition result

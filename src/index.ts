@@ -1,11 +1,4 @@
-import {
-  debug,
-  getInput,
-  info,
-  setFailed,
-  setOutput,
-  warning,
-} from '@actions/core'
+import { debug, getInput, info, setFailed, warning } from '@actions/core'
 import { getExecOutput } from '@actions/exec'
 import { Octokit } from '@octokit/action'
 
@@ -24,6 +17,7 @@ import type {
   PartitionResult,
   PullRequestEvent,
   PullRequestFile,
+  PullRequestFilePatch,
   ReviewCommentDraft,
   ReviewCommentInput,
   ReviewEvent,
@@ -90,13 +84,6 @@ function formatLineRange(startLine: number | undefined, line: number): string {
   return typeof startLine === 'number' && startLine !== line
     ? `${startLine}-${line}`
     : String(line)
-}
-
-/**
- * Normalize unknown error-like values to a concise string message.
- */
-function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }
 
 /**
@@ -418,73 +405,102 @@ export function generateReviewComments(
   return unique
 }
 
+type RightSideAnchors = Map<string, Set<number> | null>
+
 /**
- * Fetch the canonical PR diff as a string or return null on failure/unavailability.
+ * Parse the right-side lines and change counts from a unified diff patch.
+ * Returns null for malformed or unsupported patches.
  */
-async function fetchCanonicalDiff(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  pull_number: number
-): Promise<string | null> {
-  if (
-    !octokit.pulls ||
-    typeof (octokit as { pulls?: { get?: unknown } }).pulls?.get !== 'function'
-  ) {
-    debug('PR diff filter: pulls.get unavailable; skipping.')
+function parsePatchAnchors(patch: string): {
+  lines: Set<number>
+  additions: number
+  deletions: number
+} | null {
+  let parsedPatch: ReturnType<typeof parseGitDiff>
+  try {
+    parsedPatch = parseGitDiff(
+      `diff --git a/file b/file\n--- a/file\n+++ b/file\n${patch}`
+    )
+  } catch {
     return null
   }
-  try {
-    // When using application/vnd.github.v3.diff, the response data is a string, not the normal PR object
-    const { data } = (await octokit.pulls.get({
-      owner,
-      repo,
-      pull_number,
-      headers: { accept: 'application/vnd.github.v3.diff' },
-    })) as unknown as { data: string }
-    if (typeof data !== 'string' || !/^diff --git /.test(data)) {
-      debug('PR diff filter: no usable diff string; skipping.')
+
+  const file = parsedPatch.files[0]
+  if (parsedPatch.files.length !== 1 || file?.type !== 'ChangedFile') {
+    return null
+  }
+
+  const lines = new Set<number>()
+  let additions = 0
+  let deletions = 0
+
+  for (const chunk of file.chunks) {
+    if (chunk.type !== 'Chunk') return null
+
+    const beforeLines = chunk.changes.filter(
+      (change) => isDeletedLine(change) || isUnchangedLine(change)
+    ).length
+    const afterLines = chunk.changes.filter(
+      (change) => isAddedLine(change) || isUnchangedLine(change)
+    ).length
+    if (
+      beforeLines !== chunk.fromFileRange.lines ||
+      afterLines !== chunk.toFileRange.lines
+    ) {
       return null
     }
-    return data
-  } catch (err) {
-    if (isRateLimitError(err)) throw err
-    debug(`PR diff fetch failed: ${formatError(err)}`)
-    return null
+
+    for (const change of chunk.changes) {
+      if (isAddedLine(change)) {
+        lines.add(change.lineAfter)
+        additions++
+      } else if (isDeletedLine(change)) {
+        deletions++
+      } else if (isUnchangedLine(change)) {
+        lines.add(change.lineAfter)
+      }
+    }
   }
+
+  return { lines, additions, deletions }
 }
 
 /**
- * Build a lookup of valid right-side line numbers per file path.
+ * Build valid right-side line numbers from the paginated pull request file
+ * patches. A null value means the file belongs to the pull request but its
+ * patch is unavailable or incomplete, so line-level validation is skipped.
  */
 function buildRightSideAnchors(
-  parsedDiff: ReturnType<typeof parseGitDiff>
-): Record<string, Set<number>> {
-  return Object.fromEntries(
-    parsedDiff.files.flatMap((file) => {
-      if (
-        file.type !== 'ChangedFile' &&
-        file.type !== 'AddedFile' &&
-        file.type !== 'RenamedFile'
-      ) {
-        return []
-      }
-      // Renamed files anchor under their new path
-      const path = file.type === 'RenamedFile' ? file.pathAfter : file.path
-      const lines = new Set(
-        file.chunks
-          .filter((chunk) => chunk.type === 'Chunk')
-          .flatMap((chunk) =>
-            chunk.changes
-              .filter(
-                (change) => isAddedLine(change) || isUnchangedLine(change)
-              )
-              .map((change) => change.lineAfter)
-          )
-      )
-      return [[path, lines] as const]
-    })
-  )
+  pullRequestFiles: PullRequestFilePatch[]
+): RightSideAnchors {
+  const anchors: RightSideAnchors = new Map()
+
+  for (const file of pullRequestFiles) {
+    const parsed =
+      file.patch === undefined ? null : parsePatchAnchors(file.patch)
+    const complete =
+      parsed !== null &&
+      parsed.additions === file.additions &&
+      parsed.deletions === file.deletions
+
+    if (complete) {
+      anchors.set(file.filename, parsed.lines)
+      continue
+    }
+
+    if (file.additions === 0 && file.deletions === 0) {
+      anchors.set(file.filename, new Set())
+      continue
+    }
+
+    debug(
+      `PR diff filter: patch for ${file.filename} is unavailable or incomplete; ` +
+        'skipping line-level validation for this file.'
+    )
+    anchors.set(file.filename, null)
+  }
+
+  return anchors
 }
 
 /**
@@ -492,10 +508,11 @@ function buildRightSideAnchors(
  */
 function isValidSuggestion(
   comment: ReviewCommentDraft,
-  anchors: Record<string, Set<number>>
+  anchors: RightSideAnchors
 ): boolean {
-  const validLines = anchors[comment.path]
-  if (!validLines) return false
+  const validLines = anchors.get(comment.path)
+  if (validLines === undefined) return false
+  if (validLines === null) return true
   // GitHub requires the entire commented range to be part of the diff, so
   // check every line in the range, not just the endpoints.
   for (let line = comment.start_line ?? comment.line; line <= comment.line; line++) {
@@ -542,40 +559,20 @@ function logComments(
 }
 
 /**
- * Filter the supplied draft comments to those whose lines are part of the canonical
- * pull request diff (per GitHub's API).
- *
- * Returns a new array containing only valid suggestions and logs summary info.
- * Falls back to the original comments when the diff cannot be fetched/parsed for
- * benign reasons (e.g. unsupported endpoint, malformed response, parse error).
- * Rate-limit errors propagate so the caller can stop processing instead of
- * posting suggestions that may be outside the diff.
+ * Filter draft comments to files and lines in the pull request. The paginated
+ * file endpoint covers up to GitHub's 3,000-file limit, unlike the raw pull
+ * request diff, which is capped at 300 files. Comments for files whose patch is
+ * unavailable or incomplete are retained because their lines cannot be checked
+ * reliably.
  */
-async function filterSuggestionsInPullRequestDiff({
-  octokit,
-  owner,
-  repo,
-  pull_number,
+function filterSuggestionsInPullRequestDiff({
+  pullRequestFiles,
   comments,
 }: {
-  octokit: Octokit
-  owner: string
-  repo: string
-  pull_number: number
+  pullRequestFiles: PullRequestFilePatch[]
   comments: ReviewCommentDraft[]
-}): Promise<ReviewCommentDraft[]> {
-  const diffString = await fetchCanonicalDiff(octokit, owner, repo, pull_number)
-  if (!diffString) return comments
-
-  let parsedPullRequestDiff
-  try {
-    parsedPullRequestDiff = parseGitDiff(diffString)
-  } catch (err) {
-    warning(`PR diff parse failed: ${formatError(err)}`)
-    return comments
-  }
-
-  const rightSideAnchors = buildRightSideAnchors(parsedPullRequestDiff)
+}): ReviewCommentDraft[] {
+  const rightSideAnchors = buildRightSideAnchors(pullRequestFiles)
   const { pass: valid, fail: skipped } = partition(comments, (comment) =>
     isValidSuggestion(comment, rightSideAnchors)
   )
@@ -618,6 +615,7 @@ export async function run({
   pull_number,
   commit_id,
   diff,
+  pullRequestFiles,
   event,
   body,
 }: RunConfig): Promise<RunResult> {
@@ -638,15 +636,12 @@ export async function run({
     parsedDiff,
     existingCommentKeys
   )
-  const comments = await filterSuggestionsInPullRequestDiff({
-    octokit,
-    owner,
-    repo,
-    pull_number,
+  const comments = filterSuggestionsInPullRequestDiff({
+    pullRequestFiles,
     comments: initialComments,
   })
   if (!comments.length) {
-    return { comments: [], reviewCreated: false, suggestionsRemaining: 0 }
+    return { comments: [], reviewCreated: false }
   }
 
   const reviewComments = comments.slice(0, MAX_COMMENTS_PER_REVIEW)
@@ -672,19 +667,7 @@ export async function run({
   info(
     `Review created successfully with ${reviewComments.length} suggestion(s).`
   )
-  return {
-    comments: reviewComments,
-    reviewCreated: true,
-    suggestionsRemaining: comments.length - reviewComments.length,
-  }
-}
-
-/**
- * Publish the run's suggestion counts as action outputs.
- */
-function setSuggestionOutputs(posted: number, remaining: number): void {
-  setOutput('suggestions-posted', posted)
-  setOutput('suggestions-remaining', remaining)
+  return { comments: reviewComments, reviewCreated: true }
 }
 
 // Main entrypoint (only when executed directly)
@@ -735,16 +718,27 @@ async function main() {
     )
   }
 
-  // The per-page map keeps only filenames instead of accumulating full file
-  // objects (including patch text) across thousands of files.
-  const pullRequestFiles: string[] = await octokit.paginate(
+  // Keep only the fields needed to select local files and validate suggestion
+  // anchors, rather than retaining every API field across thousands of files.
+  const pullRequestFiles: PullRequestFilePatch[] = await octokit.paginate(
     octokit.pulls.listFiles,
     { owner, repo, pull_number, per_page: 100 },
-    (response) => response.data.map((file: PullRequestFile) => file.filename)
+    (response) =>
+      response.data.map(
+        ({ filename, patch, additions, deletions }: PullRequestFile) => ({
+          filename,
+          additions,
+          deletions,
+          ...(patch !== undefined && { patch }),
+        })
+      )
   )
 
   // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-  const diff = await getGitDiff(['--', ...pullRequestFiles])
+  const diff = await getGitDiff([
+    '--',
+    ...pullRequestFiles.map((file) => file.filename),
+  ])
 
   // Validate and parse the event input
   const eventInput = (getInput('event') || 'COMMENT').toUpperCase()
@@ -757,17 +751,17 @@ async function main() {
   const event = eventInput as ReviewEvent
   const body = getInput('comment') || ''
 
-  const result = await run({
+  await run({
     octokit,
     owner,
     repo,
     pull_number,
     commit_id,
     diff,
+    pullRequestFiles,
     event,
     body,
   })
-  setSuggestionOutputs(result.comments.length, result.suggestionsRemaining)
 }
 
 // pathToFileURL handles Windows paths (drive letters, backslashes), which a
@@ -780,7 +774,6 @@ if (
     if (isRateLimitError(err)) {
       warning(`GitHub API rate limit exceeded: ${err.message}`)
       warnRateLimitReset(err)
-      setSuggestionOutputs(0, 0)
       return
     }
     setFailed(err instanceof Error ? err.message : String(err))

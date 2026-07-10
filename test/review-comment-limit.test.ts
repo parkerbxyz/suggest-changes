@@ -1,7 +1,8 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import { run } from '../src/index.ts'
-import { makeDiff } from './helpers.ts'
+import type { PullRequestFilePatch } from '../src/types.ts'
+import { makeDiff, makePullRequestFile } from './helpers.ts'
 
 type ReviewParams = {
   body: string
@@ -23,6 +24,17 @@ function createMockDiff(files: Array<{ path: string }>): string {
       makeDiff(['@@ -1,1 +1,1 @@', `-old line ${i}`, `+new line ${i}`], file.path)
     )
     .join('')
+}
+
+function createMockPullRequestFiles(
+  files: Array<{ path: string }>
+): PullRequestFilePatch[] {
+  return files.map((file, i) =>
+    makePullRequestFile(
+      ['@@ -1,1 +1,1 @@', `-old line ${i}`, `+new line ${i}`],
+      file.path
+    )
+  )
 }
 
 function createMockOctokit({
@@ -68,6 +80,7 @@ describe('review comment limit', () => {
       pull_number: 1,
       commit_id: 'abc123',
       diff: createMockDiff(files),
+      pullRequestFiles: createMockPullRequestFiles(files),
       event: 'COMMENT',
       body: 'Please fix',
     })
@@ -98,6 +111,7 @@ describe('review comment limit', () => {
       pull_number: 1,
       commit_id: 'abc123',
       diff: createMockDiff(files),
+      pullRequestFiles: createMockPullRequestFiles(files),
       event: 'COMMENT',
       body: 'Please fix',
     })
@@ -116,6 +130,7 @@ describe('review comment limit', () => {
       pull_number: 1,
       commit_id: 'abc123',
       diff: createMockDiff(files),
+      pullRequestFiles: createMockPullRequestFiles(files),
       event: 'COMMENT',
       body: 'Please fix',
     })
@@ -144,6 +159,7 @@ describe('review comment limit', () => {
         pull_number: 1,
         commit_id: 'abc123',
         diff: createMockDiff(createMockFiles(1)),
+        pullRequestFiles: createMockPullRequestFiles(createMockFiles(1)),
         event: 'COMMENT',
         body: 'Review',
       }),
@@ -169,6 +185,12 @@ describe('review comment limit', () => {
       pull_number: 1,
       commit_id: 'abc123',
       diff,
+      pullRequestFiles: [
+        makePullRequestFile(
+          ['@@ -1,1 +1,1 @@', '-old', '+new'],
+          'dup.md'
+        ),
+      ],
       event: 'COMMENT',
       body: 'Review',
     })

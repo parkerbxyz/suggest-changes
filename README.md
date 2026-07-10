@@ -119,29 +119,6 @@ The review action to perform. Options: `APPROVE`, `REQUEST_CHANGES`, or `COMMENT
 
 Access token to make authenticated API calls. When using the default `GITHUB_TOKEN`, ensure the `pull-requests: write` permission is set in your workflow.
 
-## Outputs
-
-### `suggestions-posted`
-
-Number of suggestions posted in the review created by this run. `0` when no review was created, including runs stopped by API rate limits (which log a warning but do not fail the job).
-
-### `suggestions-remaining`
-
-Number of suggestions that could not be posted in this run because GitHub limits each review to 100 comments. They can be posted by a future run.
-
-For example, to fail the job whenever suggestions were posted:
-
-```yaml
-- uses: parkerbxyz/suggest-changes@v3
-  id: suggest-changes
-
-- name: Fail if there are outstanding suggestions
-  if: steps.suggest-changes.outputs.suggestions-posted > 0
-  run: |
-    echo "::error::There are outstanding suggestions to resolve."
-    exit 1
-```
-
 ## Pull requests from forks
 
 The default `GITHUB_TOKEN` has read-only permissions for pull requests from forks and cannot create review comments. There are two solutions:

@@ -1,6 +1,9 @@
 import parseGitDiff from 'parse-git-diff'
 import { generateReviewComments } from '../src/index.ts'
-import type { ReviewCommentDraft } from '../src/types.ts'
+import type {
+  PullRequestFilePatch,
+  ReviewCommentDraft,
+} from '../src/types.ts'
 
 /**
  * Build a diff string for a single file from hunk lines.
@@ -14,6 +17,21 @@ export function makeDiff(hunkLines: string[], path = 'file.md'): string {
     ...hunkLines,
     '',
   ].join('\n')
+}
+
+/**
+ * Build the subset of a pull request file response used for anchor validation.
+ */
+export function makePullRequestFile(
+  hunkLines: string[],
+  filename = 'file.md'
+): PullRequestFilePatch {
+  return {
+    filename,
+    patch: hunkLines.join('\n'),
+    additions: hunkLines.filter((line) => line.startsWith('+')).length,
+    deletions: hunkLines.filter((line) => line.startsWith('-')).length,
+  }
 }
 
 /**

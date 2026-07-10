@@ -13,11 +13,6 @@ inputs:
   event:
     description: 'The review action you want to perform. The review actions include: APPROVE, REQUEST_CHANGES, or COMMENT.'
     default: 'COMMENT'
-outputs:
-  suggestions-posted:
-    description: 'Number of suggestions posted in the review created by this run. 0 when no review was created (including rate-limited runs).'
-  suggestions-remaining:
-    description: 'Number of suggestions that could not be posted in this run because of the 100-comments-per-review limit. They can be posted by a future run.'
 runs:
   using: 'node24'
   main: 'dist/index.js'

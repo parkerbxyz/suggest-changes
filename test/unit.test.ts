@@ -8,7 +8,8 @@ import {
   run,
   sortCommentsForBatch,
 } from '../src/index.ts'
-import { makeDiff } from './helpers.ts'
+import type { PullRequestFilePatch } from '../src/types.ts'
+import { makeDiff, makePullRequestFile } from './helpers.ts'
 
 describe('Unit Tests', () => {
   describe('generateCommentKey', () => {
@@ -140,6 +141,7 @@ describe('Unit Tests', () => {
         pull_number: 1,
         commit_id: 'abc123',
         diff: '',
+        pullRequestFiles: [],
         event: 'COMMENT',
         body: 'Test review',
       })
@@ -147,7 +149,6 @@ describe('Unit Tests', () => {
       assert.deepStrictEqual(result, {
         comments: [],
         reviewCreated: false,
-        suggestionsRemaining: 0,
       })
     })
 
@@ -175,6 +176,12 @@ describe('Unit Tests', () => {
         pull_number: 1,
         commit_id: 'abc123',
         diff,
+        pullRequestFiles: [
+          makePullRequestFile(
+            ['@@ -1,1 +1,1 @@', '-old line', '+new line'],
+            'test.md'
+          ),
+        ],
         event: 'COMMENT',
         body: 'Test review',
       })
@@ -203,6 +210,12 @@ describe('Unit Tests', () => {
           pull_number: 1,
           commit_id: 'abc123',
           diff: 'diff --git a/test.md b/test.md\n--- a/test.md\n+++ b/test.md\n@@ -1,1 +1,1 @@\n-old\n+new',
+          pullRequestFiles: [
+            makePullRequestFile(
+              ['@@ -1,1 +1,1 @@', '-old', '+new'],
+              'test.md'
+            ),
+          ],
           event,
           body: '',
         })
@@ -215,32 +228,16 @@ describe('Unit Tests', () => {
     })
 
     test('should keep suggestions for renamed files in the pull request diff', async () => {
-      // The canonical PR diff reports a renamed-and-edited file as a rename;
-      // its suggestions must anchor under the new path instead of being
-      // filtered out as outside the diff.
+      // The files endpoint reports the new filename, which must match the
+      // suggestion path after a rename.
       const localDiff = makeDiff(
         ['@@ -1,1 +1,1 @@', '-old line', '+new line'],
         'new.md'
       )
-      const pullRequestDiff = [
-        'diff --git a/old.md b/new.md',
-        'similarity index 90%',
-        'rename from old.md',
-        'rename to new.md',
-        'index 0000001..0000002 100644',
-        '--- a/old.md',
-        '+++ b/new.md',
-        '@@ -1,1 +1,1 @@',
-        '-old line',
-        '+new line',
-        '',
-      ].join('\n')
-
       const mockOctokit = {
         paginate: async () => [],
         pulls: {
           listReviewComments: async () => ({ data: [] }),
-          get: async () => ({ data: pullRequestDiff }),
           createReview: async () => ({ data: { id: 123 } }),
         },
       }
@@ -253,6 +250,12 @@ describe('Unit Tests', () => {
         pull_number: 1,
         commit_id: 'abc123',
         diff: localDiff,
+        pullRequestFiles: [
+          makePullRequestFile(
+            ['@@ -1,1 +1,1 @@', '-old line', '+new line'],
+            'new.md'
+          ),
+        ],
         event: 'COMMENT',
         body: '',
       })
@@ -278,11 +281,7 @@ describe('Unit Tests', () => {
         ],
         'file.md'
       )
-      const pullRequestDiff = [
-        'diff --git a/file.md b/file.md',
-        'index 0000001..0000002 100644',
-        '--- a/file.md',
-        '+++ b/file.md',
+      const pullRequestPatch = [
         '@@ -1,2 +1,2 @@',
         ' line one',
         '-x',
@@ -291,14 +290,12 @@ describe('Unit Tests', () => {
         ' ctx five',
         '-a',
         '+b',
-        '',
-      ].join('\n')
+      ]
 
       const mockOctokit = {
         paginate: async () => [],
         pulls: {
           listReviewComments: async () => ({ data: [] }),
-          get: async () => ({ data: pullRequestDiff }),
           createReview: async () => {
             throw new Error('createReview must not be called')
           },
@@ -313,12 +310,91 @@ describe('Unit Tests', () => {
         pull_number: 1,
         commit_id: 'abc123',
         diff: localDiff,
+        pullRequestFiles: [
+          makePullRequestFile(pullRequestPatch, 'file.md'),
+        ],
         event: 'COMMENT',
         body: '',
       })
 
       assert.strictEqual(result.reviewCreated, false)
       assert.deepStrictEqual(result.comments, [])
+    })
+
+    test('should keep suggestions for files beyond the raw diff file limit', async () => {
+      const targetPath = 'file300.md'
+      const hunk = ['@@ -1,1 +1,1 @@', '-old line', '+new line']
+      const pullRequestFiles = Array.from({ length: 301 }, (_, index) =>
+        index === 300
+          ? makePullRequestFile(hunk, targetPath)
+          : makePullRequestFile([], `file${index}.md`)
+      )
+      const mockOctokit = {
+        paginate: async () => [],
+        pulls: {
+          listReviewComments: async () => ({ data: [] }),
+          createReview: async () => ({ data: { id: 123 } }),
+        },
+      }
+
+      const result = await run({
+        // @ts-expect-error - Test mock doesn't need full Octokit interface
+        octokit: mockOctokit,
+        owner: 'test-owner',
+        repo: 'test-repo',
+        pull_number: 1,
+        commit_id: 'abc123',
+        diff: makeDiff(hunk, targetPath),
+        pullRequestFiles,
+        event: 'COMMENT',
+        body: '',
+      })
+
+      assert.strictEqual(result.reviewCreated, true)
+      assert.strictEqual(result.comments.length, 1)
+      assert.strictEqual(result.comments[0].path, targetPath)
+    })
+
+    test('should retain suggestions when a file patch is unavailable or incomplete', async () => {
+      const hunk = ['@@ -1,1 +1,1 @@', '-old line', '+new line']
+      const mockOctokit = {
+        paginate: async () => [],
+        pulls: {
+          listReviewComments: async () => ({ data: [] }),
+          createReview: async () => ({ data: { id: 123 } }),
+        },
+      }
+
+      const unverifiedFiles: PullRequestFilePatch[][] = [
+        [{ filename: 'file.md', additions: 1, deletions: 1 }],
+        [
+          {
+            filename: 'file.md',
+            patch: ['@@ -1,2 +1,2 @@', '-old line', '+new line'].join(
+              '\n'
+            ),
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+      ]
+      for (const pullRequestFiles of unverifiedFiles) {
+        const result = await run({
+          // @ts-expect-error - Test mock doesn't need full Octokit interface
+          octokit: mockOctokit,
+          owner: 'test-owner',
+          repo: 'test-repo',
+          pull_number: 1,
+          commit_id: 'abc123',
+          diff: makeDiff(hunk),
+          pullRequestFiles,
+          event: 'COMMENT',
+          body: '',
+        })
+
+        assert.strictEqual(result.reviewCreated, true)
+        assert.strictEqual(result.comments.length, 1)
+      }
     })
   })
 

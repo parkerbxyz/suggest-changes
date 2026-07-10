@@ -65308,16 +65308,16 @@ function file_command_issueFileCommand(command, message) {
     if (!filePath) {
         throw new Error(`Unable to find environment variable for file command ${command}`);
     }
-    if (!external_fs_namespaceObject.existsSync(filePath)) {
+    if (!fs.existsSync(filePath)) {
         throw new Error(`Missing file at path: ${filePath}`);
     }
-    external_fs_namespaceObject.appendFileSync(filePath, `${utils_toCommandValue(message)}${external_os_namespaceObject.EOL}`, {
+    fs.appendFileSync(filePath, `${toCommandValue(message)}${os.EOL}`, {
         encoding: 'utf8'
     });
 }
 function file_command_prepareKeyValueMessage(key, value) {
-    const delimiter = `ghadelimiter_${external_crypto_namespaceObject.randomUUID()}`;
-    const convertedValue = utils_toCommandValue(value);
+    const delimiter = `ghadelimiter_${crypto.randomUUID()}`;
+    const convertedValue = toCommandValue(value);
     // These should realistically never happen, but just in case someone finds a
     // way to exploit uuid generation let's not allow keys or values that contain
     // the delimiter.
@@ -65327,7 +65327,7 @@ function file_command_prepareKeyValueMessage(key, value) {
     if (convertedValue.includes(delimiter)) {
         throw new Error(`Unexpected input: value should not contain the delimiter "${delimiter}"`);
     }
-    return `${key}<<${delimiter}${external_os_namespaceObject.EOL}${convertedValue}${external_os_namespaceObject.EOL}${delimiter}`;
+    return `${key}<<${delimiter}${os.EOL}${convertedValue}${os.EOL}${delimiter}`;
 }
 //# sourceMappingURL=file-command.js.map
 ;// CONCATENATED MODULE: external "path"
@@ -67949,10 +67949,10 @@ function getBooleanInput(name, options) {
 function setOutput(name, value) {
     const filePath = process.env['GITHUB_OUTPUT'] || '';
     if (filePath) {
-        return file_command_issueFileCommand('OUTPUT', file_command_prepareKeyValueMessage(name, value));
+        return issueFileCommand('OUTPUT', prepareKeyValueMessage(name, value));
     }
-    process.stdout.write(external_os_namespaceObject.EOL);
-    command_issueCommand('set-output', { name }, utils_toCommandValue(value));
+    process.stdout.write(os.EOL);
+    issueCommand('set-output', { name }, toCommandValue(value));
 }
 /**
  * Enables or disables the echoing of commands into stdout for the rest of the step.
@@ -72595,12 +72595,6 @@ function formatLineRange(startLine, line) {
         : String(line);
 }
 /**
- * Normalize unknown error-like values to a concise string message.
- */
-function formatError(err) {
-    return err instanceof Error ? err.message : String(err);
-}
-/**
  * Check if error has Octokit's REST request error shape.
  */
 function isRequestErrorLike(err) {
@@ -72855,62 +72849,83 @@ function generateReviewComments(parsedDiff, existingCommentKeys = new Set()) {
     return unique;
 }
 /**
- * Fetch the canonical PR diff as a string or return null on failure/unavailability.
+ * Parse the right-side lines and change counts from a unified diff patch.
+ * Returns null for malformed or unsupported patches.
  */
-async function fetchCanonicalDiff(octokit, owner, repo, pull_number) {
-    if (!octokit.pulls ||
-        typeof octokit.pulls?.get !== 'function') {
-        core_debug('PR diff filter: pulls.get unavailable; skipping.');
+function parsePatchAnchors(patch) {
+    let parsedPatch;
+    try {
+        parsedPatch = mjs(`diff --git a/file b/file\n--- a/file\n+++ b/file\n${patch}`);
+    }
+    catch {
         return null;
     }
-    try {
-        // When using application/vnd.github.v3.diff, the response data is a string, not the normal PR object
-        const { data } = (await octokit.pulls.get({
-            owner,
-            repo,
-            pull_number,
-            headers: { accept: 'application/vnd.github.v3.diff' },
-        }));
-        if (typeof data !== 'string' || !/^diff --git /.test(data)) {
-            core_debug('PR diff filter: no usable diff string; skipping.');
+    const file = parsedPatch.files[0];
+    if (parsedPatch.files.length !== 1 || file?.type !== 'ChangedFile') {
+        return null;
+    }
+    const lines = new Set();
+    let additions = 0;
+    let deletions = 0;
+    for (const chunk of file.chunks) {
+        if (chunk.type !== 'Chunk')
+            return null;
+        const beforeLines = chunk.changes.filter((change) => isDeletedLine(change) || isUnchangedLine(change)).length;
+        const afterLines = chunk.changes.filter((change) => isAddedLine(change) || isUnchangedLine(change)).length;
+        if (beforeLines !== chunk.fromFileRange.lines ||
+            afterLines !== chunk.toFileRange.lines) {
             return null;
         }
-        return data;
+        for (const change of chunk.changes) {
+            if (isAddedLine(change)) {
+                lines.add(change.lineAfter);
+                additions++;
+            }
+            else if (isDeletedLine(change)) {
+                deletions++;
+            }
+            else if (isUnchangedLine(change)) {
+                lines.add(change.lineAfter);
+            }
+        }
     }
-    catch (err) {
-        if (isRateLimitError(err))
-            throw err;
-        core_debug(`PR diff fetch failed: ${formatError(err)}`);
-        return null;
-    }
+    return { lines, additions, deletions };
 }
 /**
- * Build a lookup of valid right-side line numbers per file path.
+ * Build valid right-side line numbers from the paginated pull request file
+ * patches. A null value means the file belongs to the pull request but its
+ * patch is unavailable or incomplete, so line-level validation is skipped.
  */
-function buildRightSideAnchors(parsedDiff) {
-    return Object.fromEntries(parsedDiff.files.flatMap((file) => {
-        if (file.type !== 'ChangedFile' &&
-            file.type !== 'AddedFile' &&
-            file.type !== 'RenamedFile') {
-            return [];
+function buildRightSideAnchors(pullRequestFiles) {
+    const anchors = new Map();
+    for (const file of pullRequestFiles) {
+        const parsed = file.patch === undefined ? null : parsePatchAnchors(file.patch);
+        const complete = parsed !== null &&
+            parsed.additions === file.additions &&
+            parsed.deletions === file.deletions;
+        if (complete) {
+            anchors.set(file.filename, parsed.lines);
+            continue;
         }
-        // Renamed files anchor under their new path
-        const path = file.type === 'RenamedFile' ? file.pathAfter : file.path;
-        const lines = new Set(file.chunks
-            .filter((chunk) => chunk.type === 'Chunk')
-            .flatMap((chunk) => chunk.changes
-            .filter((change) => isAddedLine(change) || isUnchangedLine(change))
-            .map((change) => change.lineAfter)));
-        return [[path, lines]];
-    }));
+        if (file.additions === 0 && file.deletions === 0) {
+            anchors.set(file.filename, new Set());
+            continue;
+        }
+        core_debug(`PR diff filter: patch for ${file.filename} is unavailable or incomplete; ` +
+            'skipping line-level validation for this file.');
+        anchors.set(file.filename, null);
+    }
+    return anchors;
 }
 /**
  * Determine if a review comment draft is valid within the PR diff.
  */
 function isValidSuggestion(comment, anchors) {
-    const validLines = anchors[comment.path];
-    if (!validLines)
+    const validLines = anchors.get(comment.path);
+    if (validLines === undefined)
         return false;
+    if (validLines === null)
+        return true;
     // GitHub requires the entire commented range to be part of the diff, so
     // check every line in the range, not just the endpoints.
     for (let line = comment.start_line ?? comment.line; line <= comment.line; line++) {
@@ -72950,28 +72965,14 @@ function logComments(header, comments, { logger = info, detailed = false } = {})
     }
 }
 /**
- * Filter the supplied draft comments to those whose lines are part of the canonical
- * pull request diff (per GitHub's API).
- *
- * Returns a new array containing only valid suggestions and logs summary info.
- * Falls back to the original comments when the diff cannot be fetched/parsed for
- * benign reasons (e.g. unsupported endpoint, malformed response, parse error).
- * Rate-limit errors propagate so the caller can stop processing instead of
- * posting suggestions that may be outside the diff.
+ * Filter draft comments to files and lines in the pull request. The paginated
+ * file endpoint covers up to GitHub's 3,000-file limit, unlike the raw pull
+ * request diff, which is capped at 300 files. Comments for files whose patch is
+ * unavailable or incomplete are retained because their lines cannot be checked
+ * reliably.
  */
-async function filterSuggestionsInPullRequestDiff({ octokit, owner, repo, pull_number, comments, }) {
-    const diffString = await fetchCanonicalDiff(octokit, owner, repo, pull_number);
-    if (!diffString)
-        return comments;
-    let parsedPullRequestDiff;
-    try {
-        parsedPullRequestDiff = mjs(diffString);
-    }
-    catch (err) {
-        warning(`PR diff parse failed: ${formatError(err)}`);
-        return comments;
-    }
-    const rightSideAnchors = buildRightSideAnchors(parsedPullRequestDiff);
+function filterSuggestionsInPullRequestDiff({ pullRequestFiles, comments, }) {
+    const rightSideAnchors = buildRightSideAnchors(pullRequestFiles);
     const { pass: valid, fail: skipped } = partition(comments, (comment) => isValidSuggestion(comment, rightSideAnchors));
     logComments('Suggestions skipped because they are outside the pull request diff:', skipped);
     return valid;
@@ -72993,22 +72994,19 @@ function createReviewBodyWithLimitNotice(baseBody, postedComments, totalComments
 /**
  * Main execution function for the GitHub Action
  */
-async function run({ octokit, owner, repo, pull_number, commit_id, diff, event, body, }) {
+async function run({ octokit, owner, repo, pull_number, commit_id, diff, pullRequestFiles, event, body, }) {
     core_debug(`Diff output: ${diff}`);
     const existingComments = await octokit.paginate(octokit.pulls.listReviewComments, { owner, repo, pull_number, per_page: 100 });
     const existingCommentKeys = new Set(existingComments.map(generateCommentKey));
     // Parse diff after collecting existing comment keys
     const parsedDiff = mjs(diff);
     const initialComments = generateReviewComments(parsedDiff, existingCommentKeys);
-    const comments = await filterSuggestionsInPullRequestDiff({
-        octokit,
-        owner,
-        repo,
-        pull_number,
+    const comments = filterSuggestionsInPullRequestDiff({
+        pullRequestFiles,
         comments: initialComments,
     });
     if (!comments.length) {
-        return { comments: [], reviewCreated: false, suggestionsRemaining: 0 };
+        return { comments: [], reviewCreated: false };
     }
     const reviewComments = comments.slice(0, MAX_COMMENTS_PER_REVIEW);
     // Submit higher lines first (bottom-up) so batched application does not shift the anchors of suggestions yet to be applied.
@@ -73025,18 +73023,7 @@ async function run({ octokit, owner, repo, pull_number, commit_id, diff, event, 
         comments: orderedReviewComments,
     });
     info(`Review created successfully with ${reviewComments.length} suggestion(s).`);
-    return {
-        comments: reviewComments,
-        reviewCreated: true,
-        suggestionsRemaining: comments.length - reviewComments.length,
-    };
-}
-/**
- * Publish the run's suggestion counts as action outputs.
- */
-function setSuggestionOutputs(posted, remaining) {
-    setOutput('suggestions-posted', posted);
-    setOutput('suggestions-remaining', remaining);
+    return { comments: reviewComments, reviewCreated: true };
 }
 // Main entrypoint (only when executed directly)
 async function main() {
@@ -73071,11 +73058,19 @@ async function main() {
             'Suggestions may be misplaced or dropped. Check out the pull request head ' +
             '(actions/checkout with ref: ${{ github.event.pull_request.head.sha }}) — see the README.');
     }
-    // The per-page map keeps only filenames instead of accumulating full file
-    // objects (including patch text) across thousands of files.
-    const pullRequestFiles = await octokit.paginate(octokit.pulls.listFiles, { owner, repo, pull_number, per_page: 100 }, (response) => response.data.map((file) => file.filename));
+    // Keep only the fields needed to select local files and validate suggestion
+    // anchors, rather than retaining every API field across thousands of files.
+    const pullRequestFiles = await octokit.paginate(octokit.pulls.listFiles, { owner, repo, pull_number, per_page: 100 }, (response) => response.data.map(({ filename, patch, additions, deletions }) => ({
+        filename,
+        additions,
+        deletions,
+        ...(patch !== undefined && { patch }),
+    })));
     // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-    const diff = await getGitDiff(['--', ...pullRequestFiles]);
+    const diff = await getGitDiff([
+        '--',
+        ...pullRequestFiles.map((file) => file.filename),
+    ]);
     // Validate and parse the event input
     const eventInput = (getInput('event') || 'COMMENT').toUpperCase();
     const validEvents = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'];
@@ -73084,17 +73079,17 @@ async function main() {
     }
     const event = eventInput;
     const body = getInput('comment') || '';
-    const result = await run({
+    await run({
         octokit,
         owner,
         repo,
         pull_number,
         commit_id,
         diff,
+        pullRequestFiles,
         event,
         body,
     });
-    setSuggestionOutputs(result.comments.length, result.suggestionsRemaining);
 }
 // pathToFileURL handles Windows paths (drive letters, backslashes), which a
 // naive `file://${path}` template does not.
@@ -73104,7 +73099,6 @@ if (process.argv[1] &&
         if (isRateLimitError(err)) {
             warning(`GitHub API rate limit exceeded: ${err.message}`);
             warnRateLimitReset(err);
-            setSuggestionOutputs(0, 0);
             return;
         }
         setFailed(err instanceof Error ? err.message : String(err));
