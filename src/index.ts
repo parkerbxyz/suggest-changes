@@ -4,7 +4,6 @@ import { Octokit } from '@octokit/action'
 
 import { readFileSync } from 'node:fs'
 import { env } from 'node:process'
-import { pathToFileURL } from 'node:url'
 import parseGitDiff from 'parse-git-diff'
 
 import type {
@@ -702,22 +701,6 @@ async function main() {
   const pull_number = Number(eventPayload.pull_request.number)
   const commit_id = eventPayload.pull_request.head.sha
 
-  // A merge-ref checkout has line numbers that can drift from the pull
-  // request head, silently misplacing suggestions or getting them dropped.
-  const localHead = (
-    await getExecOutput('git', ['rev-parse', 'HEAD'], {
-      silent: true,
-      ignoreReturnCode: true,
-    })
-  ).stdout.trim()
-  if (localHead && localHead !== commit_id) {
-    warning(
-      `The checked-out commit (${localHead}) is not the pull request head (${commit_id}). ` +
-        'Suggestions may be misplaced or dropped. Check out the pull request head ' +
-        '(actions/checkout with ref: ${{ github.event.pull_request.head.sha }}) — see the README.'
-    )
-  }
-
   // Keep only the fields needed to select local files and validate suggestion
   // anchors, rather than retaining every API field across thousands of files.
   const pullRequestFiles: PullRequestFilePatch[] = await octokit.paginate(
@@ -764,12 +747,7 @@ async function main() {
   })
 }
 
-// pathToFileURL handles Windows paths (drive letters, backslashes), which a
-// naive `file://${path}` template does not.
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((err) => {
     if (isRateLimitError(err)) {
       warning(`GitHub API rate limit exceeded: ${err.message}`)

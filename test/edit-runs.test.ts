@@ -133,6 +133,26 @@ describe('Edit run suggestions', () => {
       )
     })
 
+    test('consecutive blank lines stay in one insertion suggestion', () => {
+      const diff = makeDiff([
+        '@@ -1,2 +1,4 @@',
+        ' Line A',
+        '+',
+        '+',
+        ' Line B',
+      ])
+
+      const suggestions = suggestionsFor(diff)
+
+      assert.strictEqual(suggestions.length, 1)
+      assert.strictEqual(suggestions[0].line, 1)
+      assert.strictEqual(suggestions[0].start_line, undefined)
+      assert.strictEqual(
+        suggestions[0].body,
+        createSuggestion('Line A\n\n')
+      )
+    })
+
     test('insertion at end of file anchors the last existing line', () => {
       const diff = makeDiff(['@@ -4,1 +4,2 @@', ' last line', '+appended'])
 

@@ -72128,8 +72128,6 @@ function getApiBaseUrl() {
 const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
 ;// CONCATENATED MODULE: external "node:process"
 const external_node_process_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:process");
-// EXTERNAL MODULE: external "node:url"
-var external_node_url_ = __nccwpck_require__(3136);
 ;// CONCATENATED MODULE: ./node_modules/parse-git-diff/build/mjs/context.js
 class Context {
     line = 1;
@@ -72540,7 +72538,6 @@ function getFilePath(ctx, input, type) {
 /* harmony default export */ const mjs = (parseGitDiff);
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ./src/index.ts
-
 
 
 
@@ -73047,17 +73044,6 @@ async function main() {
     }
     const pull_number = Number(eventPayload.pull_request.number);
     const commit_id = eventPayload.pull_request.head.sha;
-    // A merge-ref checkout has line numbers that can drift from the pull
-    // request head, silently misplacing suggestions or getting them dropped.
-    const localHead = (await getExecOutput('git', ['rev-parse', 'HEAD'], {
-        silent: true,
-        ignoreReturnCode: true,
-    })).stdout.trim();
-    if (localHead && localHead !== commit_id) {
-        warning(`The checked-out commit (${localHead}) is not the pull request head (${commit_id}). ` +
-            'Suggestions may be misplaced or dropped. Check out the pull request head ' +
-            '(actions/checkout with ref: ${{ github.event.pull_request.head.sha }}) — see the README.');
-    }
     // Keep only the fields needed to select local files and validate suggestion
     // anchors, rather than retaining every API field across thousands of files.
     const pullRequestFiles = await octokit.paginate(octokit.pulls.listFiles, { owner, repo, pull_number, per_page: 100 }, (response) => response.data.map(({ filename, patch, additions, deletions }) => ({
@@ -73091,10 +73077,7 @@ async function main() {
         body,
     });
 }
-// pathToFileURL handles Windows paths (drive letters, backslashes), which a
-// naive `file://${path}` template does not.
-if (process.argv[1] &&
-    import.meta.url === (0,external_node_url_.pathToFileURL)(process.argv[1]).href) {
+if (import.meta.url === `file://${process.argv[1]}`) {
     main().catch((err) => {
         if (isRateLimitError(err)) {
             warning(`GitHub API rate limit exceeded: ${err.message}`);
