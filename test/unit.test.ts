@@ -146,6 +146,8 @@ describe('Unit Tests', () => {
       assert.deepStrictEqual(result, {
         comments: [],
         reviewCreated: false,
+        suggestionsPosted: 0,
+        suggestionsRemaining: 0,
       })
     })
 
@@ -179,6 +181,8 @@ describe('Unit Tests', () => {
 
       assert.strictEqual(result.reviewCreated, true)
       assert.strictEqual(result.comments.length, 1)
+      assert.strictEqual(result.suggestionsPosted, 1)
+      assert.strictEqual(result.suggestionsRemaining, 0)
     })
 
     test('should accept valid event types', async () => {
