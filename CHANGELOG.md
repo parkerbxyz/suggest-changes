@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.3](https://github.com/parkerbxyz/suggest-changes/compare/v3.1.2...v3.1.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* **deps:** bump undici ([#163](https://github.com/parkerbxyz/suggest-changes/issues/163)) ([21ac955](https://github.com/parkerbxyz/suggest-changes/commit/21ac955fa3912c237fac559645e98406fc556d80))
+
 ## [3.1.2](https://github.com/parkerbxyz/suggest-changes/compare/v3.1.1...v3.1.2) (2026-06-20)
 
 
