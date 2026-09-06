@@ -1,15 +1,33 @@
 import assert from 'node:assert'
+import { resolve } from 'node:path'
 import { describe, test } from 'node:test'
+import { pathToFileURL } from 'node:url'
 import parseGitDiff from 'parse-git-diff'
 import {
   createSuggestion,
   generateCommentKey,
   generateReviewComments,
+  isDirectExecution,
   run,
   sortCommentsForBatch,
 } from '../src/index.ts'
 
 describe('Unit Tests', () => {
+  describe('isDirectExecution', () => {
+    test('should compare the entrypoint as a file URL', () => {
+      const entrypointPath = resolve('action #1.js')
+
+      assert.strictEqual(
+        isDirectExecution(pathToFileURL(entrypointPath).href, entrypointPath),
+        true
+      )
+    })
+
+    test('should return false when there is no entrypoint', () => {
+      assert.strictEqual(isDirectExecution(import.meta.url, undefined), false)
+    })
+  })
+
   describe('generateCommentKey', () => {
     test('should generate unique keys for different comments', () => {
       const comment1 = {

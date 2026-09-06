@@ -4,6 +4,7 @@ import { Octokit } from '@octokit/action'
 
 import { readFileSync } from 'node:fs'
 import { env } from 'node:process'
+import { pathToFileURL } from 'node:url'
 import parseGitDiff from 'parse-git-diff'
 
 import type {
@@ -858,6 +859,19 @@ export async function run({
   return { comments: reviewComments, reviewCreated: true }
 }
 
+/**
+ * Check whether a module is the process entrypoint.
+ */
+export function isDirectExecution(
+  moduleUrl: string,
+  entrypointPath: string | undefined
+): boolean {
+  return (
+    typeof entrypointPath === 'string' &&
+    moduleUrl === pathToFileURL(entrypointPath).href
+  )
+}
+
 // Main entrypoint (only when executed directly)
 async function main() {
   const octokit = new Octokit({
@@ -911,7 +925,7 @@ async function main() {
   await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body })
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectExecution(import.meta.url, process.argv[1])) {
   main().catch((err) => {
     if (isRateLimitError(err)) {
       warning(`GitHub API rate limit exceeded: ${err.message}`)
