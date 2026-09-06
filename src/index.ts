@@ -1,4 +1,11 @@
-import { debug, getInput, info, setFailed, warning } from '@actions/core'
+import {
+  debug,
+  getInput,
+  info,
+  setFailed,
+  setOutput,
+  warning,
+} from '@actions/core'
 import { getExecOutput } from '@actions/exec'
 import { Octokit } from '@octokit/action'
 
@@ -829,7 +836,12 @@ export async function run({
     comments: initialComments,
   })
   if (!comments.length) {
-    return { comments: [], reviewCreated: false }
+    return {
+      comments: [],
+      reviewCreated: false,
+      suggestionsPosted: 0,
+      suggestionsRemaining: 0,
+    }
   }
 
   const reviewComments = comments.slice(0, MAX_COMMENTS_PER_REVIEW)
@@ -855,11 +867,37 @@ export async function run({
   info(
     `Review created successfully with ${reviewComments.length} suggestion(s).`
   )
-  return { comments: reviewComments, reviewCreated: true }
+  return {
+    comments: reviewComments,
+    reviewCreated: true,
+    suggestionsPosted: reviewComments.length,
+    suggestionsRemaining: comments.length - reviewComments.length,
+  }
 }
 
-// Main entrypoint (only when executed directly)
-async function main() {
+type OutputWriter = (name: string, value: number) => void
+
+/**
+ * Run the action with safe suggestion count outputs.
+ */
+export async function runWithSuggestionOutputs(
+  execute: () => Promise<RunResult>,
+  writeOutput: OutputWriter = setOutput
+): Promise<RunResult> {
+  writeOutput('suggestions-posted', 0)
+  writeOutput('suggestions-remaining', 0)
+
+  const result = await execute()
+
+  writeOutput('suggestions-posted', result.suggestionsPosted)
+  writeOutput('suggestions-remaining', result.suggestionsRemaining)
+  return result
+}
+
+/**
+ * Read the action context and create a suggestion review.
+ */
+async function executeAction(): Promise<RunResult> {
   const octokit = new Octokit({
     userAgent: 'suggest-changes',
   })
@@ -908,7 +946,23 @@ async function main() {
   const event = eventInput as ReviewEvent
   const body = getInput('comment') || ''
 
-  await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body })
+  return run({
+    octokit,
+    owner,
+    repo,
+    pull_number,
+    commit_id,
+    diff,
+    event,
+    body,
+  })
+}
+
+/**
+ * Main entrypoint when the action is executed directly.
+ */
+async function main(): Promise<void> {
+  await runWithSuggestionOutputs(executeAction)
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
