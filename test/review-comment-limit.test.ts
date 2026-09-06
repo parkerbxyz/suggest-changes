@@ -1,6 +1,8 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import { run } from '../src/index.ts'
+import type { PullRequestFilePatch } from '../src/types.ts'
+import { makeDiff, makePullRequestFile } from './helpers.ts'
 
 type ReviewParams = {
   body: string
@@ -18,11 +20,21 @@ function createMockFiles(count: number): Array<{ path: string }> {
 
 function createMockDiff(files: Array<{ path: string }>): string {
   return files
-    .map(
-      (file, i) =>
-        `diff --git a/${file.path} b/${file.path}\n--- a/${file.path}\n+++ b/${file.path}\n@@ -1,1 +1,1 @@\n-old line ${i}\n+new line ${i}`
+    .map((file, i) =>
+      makeDiff(['@@ -1,1 +1,1 @@', `-old line ${i}`, `+new line ${i}`], file.path)
     )
-    .join('\n')
+    .join('')
+}
+
+function createMockPullRequestFiles(
+  files: Array<{ path: string }>
+): PullRequestFilePatch[] {
+  return files.map((file, i) =>
+    makePullRequestFile(
+      ['@@ -1,1 +1,1 @@', `-old line ${i}`, `+new line ${i}`],
+      file.path
+    )
+  )
 }
 
 function createMockOctokit({
@@ -68,6 +80,7 @@ describe('review comment limit', () => {
       pull_number: 1,
       commit_id: 'abc123',
       diff: createMockDiff(files),
+      pullRequestFiles: createMockPullRequestFiles(files),
       event: 'COMMENT',
       body: 'Please fix',
     })
@@ -98,6 +111,7 @@ describe('review comment limit', () => {
       pull_number: 1,
       commit_id: 'abc123',
       diff: createMockDiff(files),
+      pullRequestFiles: createMockPullRequestFiles(files),
       event: 'COMMENT',
       body: 'Please fix',
     })
@@ -116,6 +130,7 @@ describe('review comment limit', () => {
       pull_number: 1,
       commit_id: 'abc123',
       diff: createMockDiff(files),
+      pullRequestFiles: createMockPullRequestFiles(files),
       event: 'COMMENT',
       body: 'Please fix',
     })
@@ -144,6 +159,7 @@ describe('review comment limit', () => {
         pull_number: 1,
         commit_id: 'abc123',
         diff: createMockDiff(createMockFiles(1)),
+        pullRequestFiles: createMockPullRequestFiles(createMockFiles(1)),
         event: 'COMMENT',
         body: 'Review',
       }),
@@ -153,10 +169,8 @@ describe('review comment limit', () => {
 
   test('dedupes duplicate suggestions generated within a single run', async () => {
     // Two diff hunks producing the same path/line/suggestion should collapse to one comment.
-    const diff = [
-      `diff --git a/dup.md b/dup.md\n--- a/dup.md\n+++ b/dup.md\n@@ -1,1 +1,1 @@\n-old\n+new`,
-      `diff --git a/dup.md b/dup.md\n--- a/dup.md\n+++ b/dup.md\n@@ -1,1 +1,1 @@\n-old\n+new`,
-    ].join('\n')
+    const dupDiff = makeDiff(['@@ -1,1 +1,1 @@', '-old', '+new'], 'dup.md')
+    const diff = dupDiff + dupDiff
 
     const created: ReviewParams[] = []
     await run({
@@ -171,6 +185,12 @@ describe('review comment limit', () => {
       pull_number: 1,
       commit_id: 'abc123',
       diff,
+      pullRequestFiles: [
+        makePullRequestFile(
+          ['@@ -1,1 +1,1 @@', '-old', '+new'],
+          'dup.md'
+        ),
+      ],
       event: 'COMMENT',
       body: 'Review',
     })
