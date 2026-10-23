@@ -8,6 +8,8 @@ import {
   run,
   sortCommentsForBatch,
 } from '../src/index.ts'
+import type { PullRequestFilePatch } from '../src/types.ts'
+import { makeDiff, makePullRequestFile } from './helpers.ts'
 
 describe('Unit Tests', () => {
   describe('generateCommentKey', () => {
@@ -139,6 +141,7 @@ describe('Unit Tests', () => {
         pull_number: 1,
         commit_id: 'abc123',
         diff: '',
+        pullRequestFiles: [],
         event: 'COMMENT',
         body: 'Test review',
       })
@@ -173,6 +176,12 @@ describe('Unit Tests', () => {
         pull_number: 1,
         commit_id: 'abc123',
         diff,
+        pullRequestFiles: [
+          makePullRequestFile(
+            ['@@ -1,1 +1,1 @@', '-old line', '+new line'],
+            'test.md'
+          ),
+        ],
         event: 'COMMENT',
         body: 'Test review',
       })
@@ -201,6 +210,12 @@ describe('Unit Tests', () => {
           pull_number: 1,
           commit_id: 'abc123',
           diff: 'diff --git a/test.md b/test.md\n--- a/test.md\n+++ b/test.md\n@@ -1,1 +1,1 @@\n-old\n+new',
+          pullRequestFiles: [
+            makePullRequestFile(
+              ['@@ -1,1 +1,1 @@', '-old', '+new'],
+              'test.md'
+            ),
+          ],
           event,
           body: '',
         })
@@ -209,6 +224,176 @@ describe('Unit Tests', () => {
           result.reviewCreated || result.comments.length === 0,
           `Should accept valid event type: ${event}`
         )
+      }
+    })
+
+    test('should keep suggestions for renamed files in the pull request diff', async () => {
+      // The files endpoint reports the new filename, which must match the
+      // suggestion path after a rename.
+      const localDiff = makeDiff(
+        ['@@ -1,1 +1,1 @@', '-old line', '+new line'],
+        'new.md'
+      )
+      const mockOctokit = {
+        paginate: async () => [],
+        pulls: {
+          listReviewComments: async () => ({ data: [] }),
+          createReview: async () => ({ data: { id: 123 } }),
+        },
+      }
+
+      const result = await run({
+        // @ts-expect-error - Test mock doesn't need full Octokit interface
+        octokit: mockOctokit,
+        owner: 'test-owner',
+        repo: 'test-repo',
+        pull_number: 1,
+        commit_id: 'abc123',
+        diff: localDiff,
+        pullRequestFiles: [
+          makePullRequestFile(
+            ['@@ -1,1 +1,1 @@', '-old line', '+new line'],
+            'new.md'
+          ),
+        ],
+        event: 'COMMENT',
+        body: '',
+      })
+
+      assert.strictEqual(result.reviewCreated, true)
+      assert.strictEqual(result.comments.length, 1)
+      assert.strictEqual(result.comments[0].path, 'new.md')
+    })
+
+    test('should drop suggestions whose range crosses lines outside the pull request diff', async () => {
+      // The suggestion spans lines 2-5; the PR diff contains lines 1-2 and
+      // 5-6 but not the interior lines 3-4, so the whole range is invalid
+      // even though both endpoints are anchorable.
+      const localDiff = makeDiff(
+        [
+          '@@ -1,6 +1,2 @@',
+          ' line one',
+          '-line two',
+          '-line three',
+          '-line four',
+          '-line five',
+          ' line six',
+        ],
+        'file.md'
+      )
+      const pullRequestPatch = [
+        '@@ -1,2 +1,2 @@',
+        ' line one',
+        '-x',
+        '+y',
+        '@@ -5,2 +5,2 @@',
+        ' ctx five',
+        '-a',
+        '+b',
+      ]
+
+      const mockOctokit = {
+        paginate: async () => [],
+        pulls: {
+          listReviewComments: async () => ({ data: [] }),
+          createReview: async () => {
+            throw new Error('createReview must not be called')
+          },
+        },
+      }
+
+      const result = await run({
+        // @ts-expect-error - Test mock doesn't need full Octokit interface
+        octokit: mockOctokit,
+        owner: 'test-owner',
+        repo: 'test-repo',
+        pull_number: 1,
+        commit_id: 'abc123',
+        diff: localDiff,
+        pullRequestFiles: [
+          makePullRequestFile(pullRequestPatch, 'file.md'),
+        ],
+        event: 'COMMENT',
+        body: '',
+      })
+
+      assert.strictEqual(result.reviewCreated, false)
+      assert.deepStrictEqual(result.comments, [])
+    })
+
+    test('should keep suggestions for files beyond the raw diff file limit', async () => {
+      const targetPath = 'file300.md'
+      const hunk = ['@@ -1,1 +1,1 @@', '-old line', '+new line']
+      const pullRequestFiles = Array.from({ length: 301 }, (_, index) =>
+        index === 300
+          ? makePullRequestFile(hunk, targetPath)
+          : makePullRequestFile([], `file${index}.md`)
+      )
+      const mockOctokit = {
+        paginate: async () => [],
+        pulls: {
+          listReviewComments: async () => ({ data: [] }),
+          createReview: async () => ({ data: { id: 123 } }),
+        },
+      }
+
+      const result = await run({
+        // @ts-expect-error - Test mock doesn't need full Octokit interface
+        octokit: mockOctokit,
+        owner: 'test-owner',
+        repo: 'test-repo',
+        pull_number: 1,
+        commit_id: 'abc123',
+        diff: makeDiff(hunk, targetPath),
+        pullRequestFiles,
+        event: 'COMMENT',
+        body: '',
+      })
+
+      assert.strictEqual(result.reviewCreated, true)
+      assert.strictEqual(result.comments.length, 1)
+      assert.strictEqual(result.comments[0].path, targetPath)
+    })
+
+    test('should retain suggestions when a file patch is unavailable or incomplete', async () => {
+      const hunk = ['@@ -1,1 +1,1 @@', '-old line', '+new line']
+      const mockOctokit = {
+        paginate: async () => [],
+        pulls: {
+          listReviewComments: async () => ({ data: [] }),
+          createReview: async () => ({ data: { id: 123 } }),
+        },
+      }
+
+      const unverifiedFiles: PullRequestFilePatch[][] = [
+        [{ filename: 'file.md', additions: 1, deletions: 1 }],
+        [
+          {
+            filename: 'file.md',
+            patch: ['@@ -1,2 +1,2 @@', '-old line', '+new line'].join(
+              '\n'
+            ),
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+      ]
+      for (const pullRequestFiles of unverifiedFiles) {
+        const result = await run({
+          // @ts-expect-error - Test mock doesn't need full Octokit interface
+          octokit: mockOctokit,
+          owner: 'test-owner',
+          repo: 'test-repo',
+          pull_number: 1,
+          commit_id: 'abc123',
+          diff: makeDiff(hunk),
+          pullRequestFiles,
+          event: 'COMMENT',
+          body: '',
+        })
+
+        assert.strictEqual(result.reviewCreated, true)
+        assert.strictEqual(result.comments.length, 1)
       }
     })
   })

@@ -12,6 +12,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version-file: 'package.json'
@@ -19,3 +21,19 @@ jobs:
         run: npm ci
       - name: Run tests
         run: npm test
+      - name: Check whether dist changed
+        id: dist
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git diff --quiet "$BASE_SHA" HEAD -- dist/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Verify dist matches source
+        if: steps.dist.outputs.changed == 'true'
+        run: |
+          rm -rf dist
+          npm run build
+          git diff --exit-code -- dist/

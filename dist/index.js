@@ -65153,13 +65153,10 @@ var __webpack_exports__ = {};
 
 // EXPORTS
 __nccwpck_require__.d(__webpack_exports__, {
-  Qc: () => (/* binding */ calculateLinePosition),
   H9: () => (/* binding */ createSuggestion),
   E_: () => (/* binding */ generateCommentKey),
   o5: () => (/* binding */ generateReviewComments),
-  MW: () => (/* binding */ generateSuggestionBody),
   Wz: () => (/* binding */ getGitDiff),
-  jn: () => (/* binding */ groupChangesForSuggestions),
   eF: () => (/* binding */ run),
   IU: () => (/* binding */ sortCommentsForBatch)
 });
@@ -72595,12 +72592,6 @@ function formatLineRange(startLine, line) {
         : String(line);
 }
 /**
- * Normalize unknown error-like values to a concise string message.
- */
-function formatError(err) {
-    return err instanceof Error ? err.message : String(err);
-}
-/**
  * Check if error has Octokit's REST request error shape.
  */
 function isRequestErrorLike(err) {
@@ -72633,309 +72624,164 @@ function warnRateLimitReset(err) {
     }
 }
 /**
- * Filter changes by type for easier processing
+ * Segment a hunk's changes into edit runs: maximal sequences of consecutive
+ * added/deleted lines, in diff order. Each run is one minimal contiguous
+ * edit. The unchanged lines immediately before and after each run are
+ * recorded so pure insertions can anchor an existing line (the diff is
+ * generated with --unified=1, so a context line is present except at file
+ * boundaries). Marker lines such as "\ No newline at end of file" are
+ * ignored and do not interrupt a run.
  */
-const filterChangesByType = (changes) => ({
-    addedLines: changes.filter(isAddedLine),
-    deletedLines: changes.filter(isDeletedLine),
-    unchangedLines: changes.filter(isUnchangedLine),
-});
-/**
- * Check if group matches pattern: first is unchanged, rest are all added lines.
- * This pattern indicates blank line insertions after content lines.
- */
-function isUnchangedFollowedByAdded(group) {
-    const first = group[0];
-    return (group.length > 0 &&
-        first !== undefined &&
-        isUnchangedLine(first) &&
-        group.slice(1).every(isAddedLine));
-}
-/**
- * Check if two changes represent a line movement (same content, different positions).
- */
-function isContentMovement(deleted, added) {
-    return deleted.content === added.content;
-}
-/**
- * Detect if changes contain a line movement pattern (deletion + addition of same content).
- * Returns the deleted and added lines if a movement is detected, null otherwise.
- */
-function detectLineMovement(changes) {
-    const { deletedLines, addedLines } = filterChangesByType(changes);
-    if (deletedLines.length === 1 && addedLines.length === 1) {
-        const deleted = deletedLines[0];
-        const added = addedLines[0];
-        if (deleted && added && isContentMovement(deleted, added)) {
-            return { deleted, added };
+function collectEditRuns(changes) {
+    const runs = [];
+    let currentRun = null;
+    let lastContext;
+    for (const change of changes) {
+        if (isUnchangedLine(change)) {
+            if (currentRun) {
+                currentRun.followingContext = change;
+                currentRun = null;
+            }
+            lastContext = change;
+        }
+        else if (isAddedLine(change) || isDeletedLine(change)) {
+            if (!currentRun) {
+                currentRun = {
+                    changes: [],
+                    precedingContext: lastContext,
+                    followingContext: undefined,
+                };
+                runs.push(currentRun);
+            }
+            currentRun.changes.push(change);
         }
     }
-    return null;
+    return runs;
 }
 /**
- * Detect if the group contains a line movement pattern where content is deleted
- * and re-added at a different location (typically to insert blank lines).
- * Pattern: [..., Deleted line, Unchanged line(s), upcoming Added line with same content]
+ * Check if a run is a pure insertion (only added lines).
  */
-function isLineMovement(currentGroup, nextChange) {
-    // Check if nextChange is an added line
-    if (!isAddedLine(nextChange))
-        return false;
-    // Look for a deleted line in the current group
-    const deletedLine = currentGroup.find(isDeletedLine);
-    if (!deletedLine)
-        return false;
-    // Check if the deleted and added lines have the same content
-    // This indicates the line is being moved, not changed
-    return isContentMovement(deletedLine, nextChange);
+function isPureInsertion(run) {
+    return run.changes.every(isAddedLine);
 }
 /**
- * Check if current group should be closed for blank line insertion pattern.
- * Pattern: [Unchanged, Added...] followed by another Unchanged.
- * This helps create clean [Unchanged, Added] pairs for blank line insertions.
+ * Check if a run is a pure deletion (only deleted lines).
  */
-function shouldSplitForBlankLineInsertion(currentGroup, nextChange) {
-    return isUnchangedFollowedByAdded(currentGroup) && isUnchangedLine(nextChange);
+function isPureDeletion(run) {
+    return run.changes.every(isDeletedLine);
 }
 /**
- * Find the line number of the last added or deleted line (excluding unchanged lines).
- * Used to detect gaps between changes for proper grouping.
+ * Build the suggestion draft for a contiguous slice of hunk changes: the
+ * anchored range is the slice's before-file lines (deleted and unchanged),
+ * and the body is the slice's after-file content (added and unchanged lines,
+ * in diff order). Every draft this action produces is an instance of this
+ * rule, which is what guarantees a suggestion applies to exactly the
+ * after-file content of its range.
+ *
+ * Returns null when the slice contains no before-file line to anchor.
  */
-function getLastChangedLineNumber(group) {
-    const lastChange = group.findLast((c) => isDeletedLine(c) || isAddedLine(c));
-    if (!lastChange)
+function draftForSlice(path, slice) {
+    const beforeLines = slice.filter((change) => isDeletedLine(change) || isUnchangedLine(change));
+    const firstBefore = beforeLines.at(0);
+    const lastBefore = beforeLines.at(-1);
+    if (!firstBefore || !lastBefore)
         return null;
-    return isDeletedLine(lastChange)
-        ? lastChange.lineBefore
-        : lastChange.lineAfter;
-}
-/**
- * Group changes into logical suggestion groups based on line proximity.
- *
- * Groups contiguous or nearly contiguous changes together to create logical
- * suggestions that make sense when reviewing code. Unchanged lines are included
- * for context but don't affect contiguity calculations.
- *
- * Special case for blank line insertions (https://github.com/parkerbxyz/suggest-changes/issues/118):
- * When linters add blank lines, we get patterns like [Unchanged, Add(""), Unchanged, Add(""), ...].
- * We split these into separate [Unchanged, Add("")] pairs to create intuitive suggestions
- * that show adding a blank line after each content line, rather than confusing multi-line groups.
- *
- * Special case for line movements:
- * When a line is deleted and re-added at a different location (e.g., to insert blank lines before it),
- * we keep the deletion and addition in the same group to avoid creating separate delete/add suggestions.
- */
-function groupChangesForSuggestions(changes) {
-    if (changes.length === 0)
-        return [];
-    const groups = [];
-    let currentGroup = [];
-    for (let i = 0; i < changes.length; i++) {
-        const change = changes[i];
-        if (!change)
-            continue;
-        // Check if we should split the group for blank line insertion pattern
-        if (shouldSplitForBlankLineInsertion(currentGroup, change)) {
-            groups.push(currentGroup);
-            currentGroup = [change];
-            continue;
-        }
-        // Determine line number for gap detection
-        const lineNumber = isDeletedLine(change)
-            ? change.lineBefore
-            : isAddedLine(change)
-                ? change.lineAfter
-                : isUnchangedLine(change)
-                    ? change.lineBefore
-                    : null;
-        if (lineNumber === null)
-            continue;
-        // Get the last changed line number (ignoring unchanged lines)
-        const lastChangedLineNumber = getLastChangedLineNumber(currentGroup);
-        // Check if this looks like a line movement before applying gap detection
-        const appearsToBeLineMovement = isLineMovement(currentGroup, change);
-        // Start new group if there's a line gap between actual changes (not unchanged lines)
-        // BUT: Don't split if this appears to be a line movement (delete + re-add same content)
-        if (!isUnchangedLine(change) &&
-            lastChangedLineNumber !== null &&
-            lineNumber > lastChangedLineNumber + 1 &&
-            !appearsToBeLineMovement) {
-            groups.push(currentGroup);
-            currentGroup = [];
-        }
-        currentGroup.push(change);
-    }
-    if (currentGroup.length > 0)
-        groups.push(currentGroup);
-    return groups;
-}
-/**
- * Helper function to determine if context line comes before added lines.
- */
-const getContextLineComesFirst = (unchangedLines, addedLines) => {
-    const firstUnchanged = unchangedLines[0];
-    const firstAdded = addedLines[0];
-    if (!firstUnchanged || !firstAdded)
-        return false;
-    return firstUnchanged.lineAfter < firstAdded.lineAfter;
-};
-/**
- * Determine the anchor line for pure additions with context.
- */
-function getAnchorForAdditions(firstUnchangedLine, unchangedLines, addedLines) {
-    if (getContextLineComesFirst(unchangedLines, addedLines)) {
-        return firstUnchangedLine.lineBefore; // Context comes first: anchor to it
-    }
-    return Math.max(1, firstUnchangedLine.lineBefore - 1); // Context comes after: anchor to line before it
-}
-/**
- * Generate suggestion body and line count for a group of changes
- */
-function generateSuggestionBody(changes) {
-    const { addedLines, deletedLines, unchangedLines } = filterChangesByType(changes);
-    // Detect line movement: deletion and addition of same content.
-    // This happens when linters move lines to insert blank lines before them.
-    // Example: Line "foo" at position 5 is deleted and re-added at position 3.
-    // Without this special handling, we'd suggest "replace 'foo' with 'foo'" (confusing no-op).
-    // Instead, we suggest inserting a blank line before the moved content.
-    const movement = detectLineMovement(changes);
-    if (movement) {
-        const { deleted } = movement;
-        // Find the unchanged line before the deletion (context line)
-        const unchangedBeforeDeletion = unchangedLines.find((u) => u.lineBefore < deleted.lineBefore);
-        if (unchangedBeforeDeletion) {
-            // Count unchanged blank lines after the deleted line in the original file.
-            // When the line moves up, these blanks end up after it in the new position.
-            // To avoid consecutive blanks, we keep N-1 of them (removing one redundant blank).
-            const blanksAfterDeletion = unchangedLines.filter((u) => u.lineBefore > deleted.lineBefore && u.content === '');
-            // Build suggestion to show what the final state should be:
-            // 1. Context line (unchanged before deletion)
-            // 2. New blank line (being inserted)
-            // 3. Moved content line
-            // 4. Keep N-1 of the existing trailing blanks to maintain the same total number of blanks
-            //    (we're adding 1 new blank, so we keep N-1 existing ones to avoid increasing the total)
-            const suggestionLines = [
-                unchangedBeforeDeletion.content,
-                '',
-                deleted.content,
-            ];
-            // Keep only N-1 existing blanks by skipping the first (index 0) using slice(1)
-            // This maintains the same total blank line count after inserting the new blank
-            blanksAfterDeletion.slice(1).forEach(() => suggestionLines.push(''));
-            // Calculate total lines being replaced in the suggestion:
-            // - 1 unchanged context line
-            // - 1 deleted/moved line
-            // - N trailing blank lines after deletion
-            const totalReplacedLines = 1 + 1 + blanksAfterDeletion.length;
-            return {
-                body: createSuggestion(suggestionLines.join('\n')),
-                lineCount: totalReplacedLines,
-            };
-        }
-    }
-    // No additions means no content to suggest, except for pure deletions (empty replacement block)
-    if (addedLines.length === 0) {
-        if (deletedLines.length === 0)
-            return null;
-        return { body: createSuggestion(''), lineCount: deletedLines.length };
-    }
-    // Pure additions: include context if available
-    if (deletedLines.length === 0) {
-        const contextLineComesFirst = getContextLineComesFirst(unchangedLines, addedLines);
-        const firstUnchanged = unchangedLines[0];
-        const suggestionLines = contextLineComesFirst && firstUnchanged
-            ? [firstUnchanged.content, ...addedLines.map((line) => line.content)]
-            : addedLines.map((line) => line.content);
-        // lineCount represents the number of existing (anchor) lines being replaced,
-        // not the number of lines in the suggestion body (which can include context plus additions).
-        return {
-            body: createSuggestion(suggestionLines.join('\n')),
-            lineCount: contextLineComesFirst ? 1 : addedLines.length,
-        };
-    }
-    // Mixed changes: replace deleted content with added content
-    const suggestionLines = addedLines.map((line) => line.content);
+    const body = slice
+        .filter((change) => isAddedLine(change) || isUnchangedLine(change))
+        .map((change) => change.content);
     return {
-        body: createSuggestion(suggestionLines.join('\n')),
-        lineCount: deletedLines.length,
+        path,
+        body: createSuggestion(body.join('\n')),
+        line: lastBefore.lineBefore,
+        ...(firstBefore.lineBefore !== lastBefore.lineBefore && {
+            start_line: firstBefore.lineBefore,
+            start_side: 'RIGHT',
+        }),
     };
 }
 /**
- * Calculate line positioning for GitHub review comments.
+ * Build a review comment draft for a single edit run.
+ *
+ * Runs with deletions anchor exactly the deleted lines. Pure insertions
+ * cannot target zero lines on GitHub, so they widen the slice by one
+ * adjacent unchanged line, whose content the body then preserves: the line
+ * before the insertion point by default, or the line after it when the
+ * insertion is at the top of the file. Returns null when there is no
+ * existing line to anchor (empty before-file).
  */
-function calculateLinePosition(groupChanges, lineCount, fromFileRange) {
-    const { addedLines, unchangedLines } = filterChangesByType(groupChanges);
-    // Try to find the best target line in order of preference
-    const firstDeletedLine = groupChanges.find(isDeletedLine);
-    const firstUnchangedLine = unchangedLines.length > 0 ? unchangedLines[0] : undefined;
-    // Log unexpected state: unchanged line present but no added lines
-    if (firstUnchangedLine && addedLines.length === 0 && !firstDeletedLine) {
-        core_debug(`[BUG] Unexpected state: firstUnchangedLine present but addedLines.length === 0. ` +
-            `This branch should not be reached. groupChanges: ${JSON.stringify(groupChanges)}`);
+function buildCommentDraft(path, run) {
+    if (!isPureInsertion(run))
+        return draftForSlice(path, run.changes);
+    if (run.precedingContext) {
+        return draftForSlice(path, [run.precedingContext, ...run.changes]);
     }
-    // Check for line movement: if we have deletion and addition of same content,
-    // anchor to the unchanged line before the deletion
-    const movement = detectLineMovement(groupChanges);
-    if (movement &&
-        firstUnchangedLine &&
-        firstUnchangedLine.lineBefore < movement.deleted.lineBefore) {
-        // Line movement: anchor to the unchanged line before the deletion
-        const startLine = firstUnchangedLine.lineBefore;
-        return { startLine, endLine: startLine + lineCount - 1 };
+    if (run.followingContext) {
+        return draftForSlice(path, [...run.changes, run.followingContext]);
     }
-    // Determine anchor line based on the type of change
-    const startLine = firstDeletedLine?.lineBefore ?? // Deletions: use original line
-        (firstUnchangedLine && addedLines.length > 0
-            ? getAnchorForAdditions(firstUnchangedLine, unchangedLines, addedLines) // Pure additions with context
-            : firstUnchangedLine?.lineBefore ?? fromFileRange.start); // Fallback to context line or file range
-    return { startLine, endLine: startLine + lineCount - 1 };
+    core_debug(`Skipping insertion in ${path}: no existing line to anchor a suggestion to (empty file)`);
+    return null;
+}
+/**
+ * Merge two runs separated by exactly one unchanged line (they share the
+ * same context object) into a single draft covering both, in two cases:
+ *
+ * - Adjacent-line moves: one run purely deletes lines, the other purely
+ *   inserts identical content — the pattern linters produce when inserting
+ *   a blank line before existing content. Merging keeps the move atomic;
+ *   applied separately, the deletion alone would drop the moved content.
+ * - Anchor collisions: an insertion at the top of the file falls back to
+ *   anchoring its following context line, which the insertion right after
+ *   that line anchors too. Merging avoids two suggestions for one line.
+ *
+ * Returns null when the runs do not qualify.
+ */
+function tryMergeRuns(path, runA, runB) {
+    const between = runA.followingContext;
+    if (!between || between !== runB.precedingContext)
+        return null;
+    const deleteRun = isPureDeletion(runA) ? runA : isPureDeletion(runB) ? runB : null;
+    const insertRun = isPureInsertion(runA) ? runA : isPureInsertion(runB) ? runB : null;
+    const isIdenticalMove = deleteRun !== null &&
+        insertRun !== null &&
+        deleteRun.changes.length === insertRun.changes.length &&
+        deleteRun.changes.every((change, i) => change.content === insertRun.changes[i]?.content);
+    const anchorsCollide = isPureInsertion(runA) && !runA.precedingContext && isPureInsertion(runB);
+    if (!isIdenticalMove && !anchorsCollide)
+        return null;
+    return draftForSlice(path, [...runA.changes, between, ...runB.changes]);
+}
+/**
+ * Build review comment drafts for all edit runs in a hunk, merging
+ * neighboring runs when they qualify (see tryMergeRuns).
+ */
+function buildCommentDraftsForHunk(path, changes) {
+    const runs = collectEditRuns(changes);
+    const drafts = [];
+    for (let i = 0; i < runs.length; i++) {
+        const run = runs[i];
+        if (!run)
+            continue;
+        const nextRun = runs[i + 1];
+        const merged = nextRun && tryMergeRuns(path, run, nextRun);
+        if (merged) {
+            drafts.push(merged);
+            i++;
+            continue;
+        }
+        const draft = buildCommentDraft(path, run);
+        if (draft)
+            drafts.push(draft);
+    }
+    return drafts;
 }
 /**
  * Function to generate a unique key for a comment
  */
 const generateCommentKey = (comment) => `${comment.path}:${comment.line ?? ''}:${comment.start_line ?? ''}:${comment.body}`;
 /**
- * Lazily iterate over all suggestion groups in a parsed diff.
- * Yields objects containing path, fromFileRange, and group changes.
- */
-function* iterateSuggestionGroups(parsedDiff) {
-    for (const file of parsedDiff.files) {
-        if (file.type !== 'ChangedFile')
-            continue;
-        const path = file.path;
-        for (const chunk of file.chunks) {
-            if (chunk.type !== 'Chunk')
-                continue;
-            const { fromFileRange, changes } = chunk;
-            const groups = groupChangesForSuggestions(changes);
-            for (const group of groups) {
-                yield { path, fromFileRange, group };
-            }
-        }
-    }
-}
-/**
- * Build a review comment draft from a suggestion group.
- * Returns null if the group does not produce a valid suggestion body.
- */
-function buildCommentDraft(path, fromFileRange, group) {
-    const suggestion = generateSuggestionBody(group);
-    if (!suggestion)
-        return null;
-    const { body, lineCount } = suggestion;
-    const { startLine, endLine } = calculateLinePosition(group, lineCount, fromFileRange);
-    return {
-        path,
-        body,
-        line: endLine,
-        ...(lineCount > 1 && {
-            start_line: startLine,
-            start_side: 'RIGHT',
-        }),
-    };
-}
-/**
- * Sort comments so batched suggestion application processes lower lines before higher lines.
+ * Sort comments bottom-up (higher lines before lower lines) per file so
+ * batched suggestion application does not shift the anchors of suggestions
+ * that have not been applied yet.
  */
 function sortCommentsForBatch(comments) {
     return comments.toSorted((a, b) => {
@@ -72967,10 +72813,14 @@ function partition(items, predicate) {
  */
 function generateReviewComments(parsedDiff, existingCommentKeys = new Set()) {
     const drafts = [];
-    for (const { path, fromFileRange, group } of iterateSuggestionGroups(parsedDiff)) {
-        const draft = buildCommentDraft(path, fromFileRange, group);
-        if (draft)
-            drafts.push(draft);
+    for (const file of parsedDiff.files) {
+        if (file.type !== 'ChangedFile')
+            continue;
+        for (const chunk of file.chunks) {
+            if (chunk.type !== 'Chunk')
+                continue;
+            drafts.push(...buildCommentDraftsForHunk(file.path, chunk.changes));
+        }
     }
     // Log all generated suggestions with detailed debug info
     if (drafts.length) {
@@ -72996,61 +72846,89 @@ function generateReviewComments(parsedDiff, existingCommentKeys = new Set()) {
     return unique;
 }
 /**
- * Fetch the canonical PR diff as a string or return null on failure/unavailability.
+ * Parse the right-side lines and change counts from a unified diff patch.
+ * Returns null for malformed or unsupported patches.
  */
-async function fetchCanonicalDiff(octokit, owner, repo, pull_number) {
-    if (!octokit.pulls ||
-        typeof octokit.pulls?.get !== 'function') {
-        core_debug('PR diff filter: pulls.get unavailable; skipping.');
+function parsePatchAnchors(patch) {
+    let parsedPatch;
+    try {
+        parsedPatch = mjs(`diff --git a/file b/file\n--- a/file\n+++ b/file\n${patch}`);
+    }
+    catch {
         return null;
     }
-    try {
-        // When using application/vnd.github.v3.diff, the response data is a string, not the normal PR object
-        const { data } = (await octokit.pulls.get({
-            owner,
-            repo,
-            pull_number,
-            headers: { accept: 'application/vnd.github.v3.diff' },
-        }));
-        if (typeof data !== 'string' || !/^diff --git /.test(data)) {
-            core_debug('PR diff filter: no usable diff string; skipping.');
+    const file = parsedPatch.files[0];
+    if (parsedPatch.files.length !== 1 || file?.type !== 'ChangedFile') {
+        return null;
+    }
+    const lines = new Set();
+    let additions = 0;
+    let deletions = 0;
+    for (const chunk of file.chunks) {
+        if (chunk.type !== 'Chunk')
+            return null;
+        const beforeLines = chunk.changes.filter((change) => isDeletedLine(change) || isUnchangedLine(change)).length;
+        const afterLines = chunk.changes.filter((change) => isAddedLine(change) || isUnchangedLine(change)).length;
+        if (beforeLines !== chunk.fromFileRange.lines ||
+            afterLines !== chunk.toFileRange.lines) {
             return null;
         }
-        return data;
+        for (const change of chunk.changes) {
+            if (isAddedLine(change)) {
+                lines.add(change.lineAfter);
+                additions++;
+            }
+            else if (isDeletedLine(change)) {
+                deletions++;
+            }
+            else if (isUnchangedLine(change)) {
+                lines.add(change.lineAfter);
+            }
+        }
     }
-    catch (err) {
-        if (isRateLimitError(err))
-            throw err;
-        core_debug(`PR diff fetch failed: ${formatError(err)}`);
-        return null;
-    }
+    return { lines, additions, deletions };
 }
 /**
- * Build a lookup of valid right-side line numbers per file path.
+ * Build valid right-side line numbers from the paginated pull request file
+ * patches. A null value means the file belongs to the pull request but its
+ * patch is unavailable or incomplete, so line-level validation is skipped.
  */
-function buildRightSideAnchors(parsedDiff) {
-    return Object.fromEntries(parsedDiff.files
-        .filter((file) => file.type === 'ChangedFile' || file.type === 'AddedFile')
-        .map((file) => [
-        file.path,
-        new Set(file.chunks
-            .filter((chunk) => chunk.type === 'Chunk')
-            .flatMap((chunk) => chunk.changes
-            .filter((change) => isAddedLine(change) || isUnchangedLine(change))
-            .map((change) => change.lineAfter))),
-    ]));
+function buildRightSideAnchors(pullRequestFiles) {
+    const anchors = new Map();
+    for (const file of pullRequestFiles) {
+        const parsed = file.patch === undefined ? null : parsePatchAnchors(file.patch);
+        const complete = parsed !== null &&
+            parsed.additions === file.additions &&
+            parsed.deletions === file.deletions;
+        if (complete) {
+            anchors.set(file.filename, parsed.lines);
+            continue;
+        }
+        if (file.additions === 0 && file.deletions === 0) {
+            anchors.set(file.filename, new Set());
+            continue;
+        }
+        core_debug(`PR diff filter: patch for ${file.filename} is unavailable or incomplete; ` +
+            'skipping line-level validation for this file.');
+        anchors.set(file.filename, null);
+    }
+    return anchors;
 }
 /**
  * Determine if a review comment draft is valid within the PR diff.
  */
 function isValidSuggestion(comment, anchors) {
-    const validLines = anchors[comment.path];
-    if (!validLines)
+    const validLines = anchors.get(comment.path);
+    if (validLines === undefined)
         return false;
-    if (!validLines.has(comment.line))
-        return false;
-    if (comment.start_line !== undefined && !validLines.has(comment.start_line))
-        return false;
+    if (validLines === null)
+        return true;
+    // GitHub requires the entire commented range to be part of the diff, so
+    // check every line in the range, not just the endpoints.
+    for (let line = comment.start_line ?? comment.line; line <= comment.line; line++) {
+        if (!validLines.has(line))
+            return false;
+    }
     return true;
 }
 /**
@@ -73084,28 +72962,14 @@ function logComments(header, comments, { logger = info, detailed = false } = {})
     }
 }
 /**
- * Filter the supplied draft comments to those whose lines are part of the canonical
- * pull request diff (per GitHub's API).
- *
- * Returns a new array containing only valid suggestions and logs summary info.
- * Falls back to the original comments when the diff cannot be fetched/parsed for
- * benign reasons (e.g. unsupported endpoint, malformed response, parse error).
- * Rate-limit errors propagate so the caller can stop processing instead of
- * posting suggestions that may be outside the diff.
+ * Filter draft comments to files and lines in the pull request. The paginated
+ * file endpoint covers up to GitHub's 3,000-file limit, unlike the raw pull
+ * request diff, which is capped at 300 files. Comments for files whose patch is
+ * unavailable or incomplete are retained because their lines cannot be checked
+ * reliably.
  */
-async function filterSuggestionsInPullRequestDiff({ octokit, owner, repo, pull_number, comments, }) {
-    const diffString = await fetchCanonicalDiff(octokit, owner, repo, pull_number);
-    if (!diffString)
-        return comments;
-    let parsedPullRequestDiff;
-    try {
-        parsedPullRequestDiff = mjs(diffString);
-    }
-    catch (err) {
-        warning(`PR diff parse failed: ${formatError(err)}`);
-        return comments;
-    }
-    const rightSideAnchors = buildRightSideAnchors(parsedPullRequestDiff);
+function filterSuggestionsInPullRequestDiff({ pullRequestFiles, comments, }) {
+    const rightSideAnchors = buildRightSideAnchors(pullRequestFiles);
     const { pass: valid, fail: skipped } = partition(comments, (comment) => isValidSuggestion(comment, rightSideAnchors));
     logComments('Suggestions skipped because they are outside the pull request diff:', skipped);
     return valid;
@@ -73127,25 +72991,22 @@ function createReviewBodyWithLimitNotice(baseBody, postedComments, totalComments
 /**
  * Main execution function for the GitHub Action
  */
-async function run({ octokit, owner, repo, pull_number, commit_id, diff, event, body, }) {
+async function run({ octokit, owner, repo, pull_number, commit_id, diff, pullRequestFiles, event, body, }) {
     core_debug(`Diff output: ${diff}`);
     const existingComments = await octokit.paginate(octokit.pulls.listReviewComments, { owner, repo, pull_number, per_page: 100 });
     const existingCommentKeys = new Set(existingComments.map(generateCommentKey));
     // Parse diff after collecting existing comment keys
     const parsedDiff = mjs(diff);
     const initialComments = generateReviewComments(parsedDiff, existingCommentKeys);
-    const comments = await filterSuggestionsInPullRequestDiff({
-        octokit,
-        owner,
-        repo,
-        pull_number,
+    const comments = filterSuggestionsInPullRequestDiff({
+        pullRequestFiles,
         comments: initialComments,
     });
     if (!comments.length) {
         return { comments: [], reviewCreated: false };
     }
     const reviewComments = comments.slice(0, MAX_COMMENTS_PER_REVIEW);
-    // Submit lower lines first so batched application does not shift later anchors.
+    // Submit higher lines first (bottom-up) so batched application does not shift the anchors of suggestions yet to be applied.
     const orderedReviewComments = sortCommentsForBatch(reviewComments);
     logComments('Suggestions to be included in review:', orderedReviewComments);
     const reviewBody = createReviewBodyWithLimitNotice(body, reviewComments.length, comments.length);
@@ -73183,9 +73044,19 @@ async function main() {
     }
     const pull_number = Number(eventPayload.pull_request.number);
     const commit_id = eventPayload.pull_request.head.sha;
-    const pullRequestFiles = (await octokit.pulls.listFiles({ owner, repo, pull_number })).data.map((file) => file.filename);
+    // Keep only the fields needed to select local files and validate suggestion
+    // anchors, rather than retaining every API field across thousands of files.
+    const pullRequestFiles = await octokit.paginate(octokit.pulls.listFiles, { owner, repo, pull_number, per_page: 100 }, (response) => response.data.map(({ filename, patch, additions, deletions }) => ({
+        filename,
+        additions,
+        deletions,
+        ...(patch !== undefined && { patch }),
+    })));
     // Get the diff between the head branch and the base branch (limit to the files in the pull request)
-    const diff = await getGitDiff(['--', ...pullRequestFiles]);
+    const diff = await getGitDiff([
+        '--',
+        ...pullRequestFiles.map((file) => file.filename),
+    ]);
     // Validate and parse the event input
     const eventInput = (getInput('event') || 'COMMENT').toUpperCase();
     const validEvents = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'];
@@ -73194,7 +73065,17 @@ async function main() {
     }
     const event = eventInput;
     const body = getInput('comment') || '';
-    await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body });
+    await run({
+        octokit,
+        owner,
+        repo,
+        pull_number,
+        commit_id,
+        diff,
+        pullRequestFiles,
+        event,
+        body,
+    });
 }
 if (import.meta.url === `file://${process.argv[1]}`) {
     main().catch((err) => {
@@ -73207,13 +73088,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     });
 }
 
-var __webpack_exports__calculateLinePosition = __webpack_exports__.Qc;
 var __webpack_exports__createSuggestion = __webpack_exports__.H9;
 var __webpack_exports__generateCommentKey = __webpack_exports__.E_;
 var __webpack_exports__generateReviewComments = __webpack_exports__.o5;
-var __webpack_exports__generateSuggestionBody = __webpack_exports__.MW;
 var __webpack_exports__getGitDiff = __webpack_exports__.Wz;
-var __webpack_exports__groupChangesForSuggestions = __webpack_exports__.jn;
 var __webpack_exports__run = __webpack_exports__.eF;
 var __webpack_exports__sortCommentsForBatch = __webpack_exports__.IU;
-export { __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__groupChangesForSuggestions as groupChangesForSuggestions, __webpack_exports__run as run, __webpack_exports__sortCommentsForBatch as sortCommentsForBatch };
+export { __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__run as run, __webpack_exports__sortCommentsForBatch as sortCommentsForBatch };

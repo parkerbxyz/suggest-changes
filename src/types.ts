@@ -22,6 +22,11 @@ export type ReviewCommentInput = NonNullable<
 export type PullRequestFile =
   Endpoints['GET /repos/{owner}/{repo}/pulls/{pull_number}/files']['response']['data'][number]
 
+export type PullRequestFilePatch = Pick<
+  PullRequestFile,
+  'filename' | 'patch' | 'additions' | 'deletions'
+>
+
 export type ReviewEvent = NonNullable<
   Endpoints['POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews']['parameters']['event']
 >
@@ -34,29 +39,13 @@ export interface ReviewCommentDraft extends ReviewCommentInput {
   line: number
 }
 
-// Suggestion body with metadata
-export interface SuggestionBody {
-  body: string
-  lineCount: number
-}
-
-// Line positioning for suggestions
-export interface LinePosition {
-  startLine: number
-  endLine: number
-}
-
-// Line movement detection result
-export interface LineMovement {
-  deleted: DeletedLine
-  added: AddedLine
-}
-
-// Filtered change types
-export interface FilteredChanges {
-  addedLines: AddedLine[]
-  deletedLines: DeletedLine[]
-  unchangedLines: UnchangedLine[]
+// A maximal sequence of consecutive added/deleted lines within a hunk,
+// in diff order, with the unchanged lines immediately before and after it
+// (when present)
+export interface EditRun {
+  changes: (AddedLine | DeletedLine)[]
+  precedingContext: UnchangedLine | undefined
+  followingContext: UnchangedLine | undefined
 }
 
 // Action run configuration
@@ -67,6 +56,7 @@ export interface RunConfig {
   pull_number: number
   commit_id: string
   diff: string
+  pullRequestFiles: PullRequestFilePatch[]
   event: ReviewEvent
   body: string
 }
