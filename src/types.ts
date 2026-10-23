@@ -75,6 +75,8 @@ export interface RunConfig {
 export interface RunResult {
   comments: ReviewCommentDraft[]
   reviewCreated: boolean
+  suggestionsPosted: number
+  suggestionsRemaining: number
 }
 
 // Partition result

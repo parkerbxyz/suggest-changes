@@ -13,6 +13,11 @@ inputs:
   event:
     description: 'The review action you want to perform. The review actions include: APPROVE, REQUEST_CHANGES, or COMMENT.'
     default: 'COMMENT'
+outputs:
+  suggestions-posted:
+    description: 'Number of suggestions posted in the review created by this run.'
+  suggestions-remaining:
+    description: 'Number of suggestions deferred because GitHub limits each review to 100 comments.'
 runs:
   using: 'node24'
   main: 'dist/index.js'

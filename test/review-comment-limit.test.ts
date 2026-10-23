@@ -78,6 +78,8 @@ describe('review comment limit', () => {
     assert.ok(createdReviews[0].body.includes('Posted 100 of 150'))
     assert.strictEqual(result.reviewCreated, true)
     assert.strictEqual(result.comments.length, 100)
+    assert.strictEqual(result.suggestionsPosted, 100)
+    assert.strictEqual(result.suggestionsRemaining, 50)
     assert.strictEqual(result.comments[0].path, 'file0.md')
     assert.strictEqual(result.comments[99].path, 'file99.md')
   })
@@ -122,6 +124,8 @@ describe('review comment limit', () => {
 
     assert.strictEqual(secondRunReviews.length, 1)
     assert.strictEqual(secondRunReviews[0].comments.length, 50)
+    assert.strictEqual(result.suggestionsPosted, 50)
+    assert.strictEqual(result.suggestionsRemaining, 0)
     assert.strictEqual(result.comments[0].path, 'file100.md')
     assert.strictEqual(result.comments[49].path, 'file149.md')
   })

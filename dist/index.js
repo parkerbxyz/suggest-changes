@@ -65161,6 +65161,7 @@ __nccwpck_require__.d(__webpack_exports__, {
   Wz: () => (/* binding */ getGitDiff),
   jn: () => (/* binding */ groupChangesForSuggestions),
   eF: () => (/* binding */ run),
+  u_: () => (/* binding */ runWithSuggestionOutputs),
   IU: () => (/* binding */ sortCommentsForBatch)
 });
 
@@ -65311,16 +65312,16 @@ function file_command_issueFileCommand(command, message) {
     if (!filePath) {
         throw new Error(`Unable to find environment variable for file command ${command}`);
     }
-    if (!fs.existsSync(filePath)) {
+    if (!external_fs_namespaceObject.existsSync(filePath)) {
         throw new Error(`Missing file at path: ${filePath}`);
     }
-    fs.appendFileSync(filePath, `${toCommandValue(message)}${os.EOL}`, {
+    external_fs_namespaceObject.appendFileSync(filePath, `${utils_toCommandValue(message)}${external_os_namespaceObject.EOL}`, {
         encoding: 'utf8'
     });
 }
 function file_command_prepareKeyValueMessage(key, value) {
-    const delimiter = `ghadelimiter_${crypto.randomUUID()}`;
-    const convertedValue = toCommandValue(value);
+    const delimiter = `ghadelimiter_${external_crypto_namespaceObject.randomUUID()}`;
+    const convertedValue = utils_toCommandValue(value);
     // These should realistically never happen, but just in case someone finds a
     // way to exploit uuid generation let's not allow keys or values that contain
     // the delimiter.
@@ -65330,7 +65331,7 @@ function file_command_prepareKeyValueMessage(key, value) {
     if (convertedValue.includes(delimiter)) {
         throw new Error(`Unexpected input: value should not contain the delimiter "${delimiter}"`);
     }
-    return `${key}<<${delimiter}${os.EOL}${convertedValue}${os.EOL}${delimiter}`;
+    return `${key}<<${delimiter}${external_os_namespaceObject.EOL}${convertedValue}${external_os_namespaceObject.EOL}${delimiter}`;
 }
 //# sourceMappingURL=file-command.js.map
 ;// CONCATENATED MODULE: external "path"
@@ -67952,10 +67953,10 @@ function getBooleanInput(name, options) {
 function setOutput(name, value) {
     const filePath = process.env['GITHUB_OUTPUT'] || '';
     if (filePath) {
-        return issueFileCommand('OUTPUT', prepareKeyValueMessage(name, value));
+        return file_command_issueFileCommand('OUTPUT', file_command_prepareKeyValueMessage(name, value));
     }
-    process.stdout.write(os.EOL);
-    issueCommand('set-output', { name }, toCommandValue(value));
+    process.stdout.write(external_os_namespaceObject.EOL);
+    command_issueCommand('set-output', { name }, utils_toCommandValue(value));
 }
 /**
  * Enables or disables the echoing of commands into stdout for the rest of the step.
@@ -73142,7 +73143,12 @@ async function run({ octokit, owner, repo, pull_number, commit_id, diff, event, 
         comments: initialComments,
     });
     if (!comments.length) {
-        return { comments: [], reviewCreated: false };
+        return {
+            comments: [],
+            reviewCreated: false,
+            suggestionsPosted: 0,
+            suggestionsRemaining: 0,
+        };
     }
     const reviewComments = comments.slice(0, MAX_COMMENTS_PER_REVIEW);
     // Submit lower lines first so batched application does not shift later anchors.
@@ -73159,10 +73165,28 @@ async function run({ octokit, owner, repo, pull_number, commit_id, diff, event, 
         comments: orderedReviewComments,
     });
     info(`Review created successfully with ${reviewComments.length} suggestion(s).`);
-    return { comments: reviewComments, reviewCreated: true };
+    return {
+        comments: reviewComments,
+        reviewCreated: true,
+        suggestionsPosted: reviewComments.length,
+        suggestionsRemaining: comments.length - reviewComments.length,
+    };
 }
-// Main entrypoint (only when executed directly)
-async function main() {
+/**
+ * Run the action with safe suggestion count outputs.
+ */
+async function runWithSuggestionOutputs(execute, writeOutput = setOutput) {
+    writeOutput('suggestions-posted', 0);
+    writeOutput('suggestions-remaining', 0);
+    const result = await execute();
+    writeOutput('suggestions-posted', result.suggestionsPosted);
+    writeOutput('suggestions-remaining', result.suggestionsRemaining);
+    return result;
+}
+/**
+ * Read the action context and create a suggestion review.
+ */
+async function executeAction() {
     const octokit = new dist_bundle_Octokit({
         userAgent: 'suggest-changes',
     });
@@ -73194,7 +73218,22 @@ async function main() {
     }
     const event = eventInput;
     const body = getInput('comment') || '';
-    await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body });
+    return run({
+        octokit,
+        owner,
+        repo,
+        pull_number,
+        commit_id,
+        diff,
+        event,
+        body,
+    });
+}
+/**
+ * Main entrypoint when the action is executed directly.
+ */
+async function main() {
+    await runWithSuggestionOutputs(executeAction);
 }
 if (import.meta.url === `file://${process.argv[1]}`) {
     main().catch((err) => {
@@ -73215,5 +73254,6 @@ var __webpack_exports__generateSuggestionBody = __webpack_exports__.MW;
 var __webpack_exports__getGitDiff = __webpack_exports__.Wz;
 var __webpack_exports__groupChangesForSuggestions = __webpack_exports__.jn;
 var __webpack_exports__run = __webpack_exports__.eF;
+var __webpack_exports__runWithSuggestionOutputs = __webpack_exports__.u_;
 var __webpack_exports__sortCommentsForBatch = __webpack_exports__.IU;
-export { __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__groupChangesForSuggestions as groupChangesForSuggestions, __webpack_exports__run as run, __webpack_exports__sortCommentsForBatch as sortCommentsForBatch };
+export { __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__groupChangesForSuggestions as groupChangesForSuggestions, __webpack_exports__run as run, __webpack_exports__runWithSuggestionOutputs as runWithSuggestionOutputs, __webpack_exports__sortCommentsForBatch as sortCommentsForBatch };
