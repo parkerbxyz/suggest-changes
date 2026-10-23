@@ -69,6 +69,24 @@ export async function getGitDiff(gitArgs: string[]): Promise<string> {
 }
 
 /**
+ * Warn when the checked-out commit differs from the pull request head.
+ */
+export function warnIfCheckoutDiffersFromPullRequestHead(
+  localHead: string,
+  pullRequestHead: string,
+  logWarning: (message: string) => void = warning
+): void {
+  if (!localHead || localHead === pullRequestHead) return
+
+  logWarning(
+    `The checked-out commit (${localHead}) does not match the pull request head (${pullRequestHead}). ` +
+      'Merge-ref line numbers can drift from the pull request head, causing suggestions to be misplaced or rejected. ' +
+      'Check out the pull request head with actions/checkout using ' +
+      'ref: ${{ github.event.pull_request.head.sha }}.'
+  )
+}
+
+/**
  * Create a suggestion fenced block.
  */
 export function createSuggestion(content: string): string {
@@ -889,6 +907,14 @@ async function main() {
 
   const pull_number = Number(eventPayload.pull_request.number)
   const commit_id = eventPayload.pull_request.head.sha
+
+  const localHead = (
+    await getExecOutput('git', ['rev-parse', 'HEAD'], {
+      silent: true,
+      ignoreReturnCode: true,
+    })
+  ).stdout.trim()
+  warnIfCheckoutDiffersFromPullRequestHead(localHead, commit_id)
 
   const pullRequestFiles = (
     await octokit.pulls.listFiles({ owner, repo, pull_number })

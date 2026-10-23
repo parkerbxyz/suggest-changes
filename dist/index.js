@@ -65161,7 +65161,8 @@ __nccwpck_require__.d(__webpack_exports__, {
   Wz: () => (/* binding */ getGitDiff),
   jn: () => (/* binding */ groupChangesForSuggestions),
   eF: () => (/* binding */ run),
-  IU: () => (/* binding */ sortCommentsForBatch)
+  IU: () => (/* binding */ sortCommentsForBatch),
+  FJ: () => (/* binding */ warnIfCheckoutDiffersFromPullRequestHead)
 });
 
 ;// CONCATENATED MODULE: external "os"
@@ -72578,6 +72579,17 @@ async function getGitDiff(gitArgs) {
     return result.stdout;
 }
 /**
+ * Warn when the checked-out commit differs from the pull request head.
+ */
+function warnIfCheckoutDiffersFromPullRequestHead(localHead, pullRequestHead, logWarning = warning) {
+    if (!localHead || localHead === pullRequestHead)
+        return;
+    logWarning(`The checked-out commit (${localHead}) does not match the pull request head (${pullRequestHead}). ` +
+        'Merge-ref line numbers can drift from the pull request head, causing suggestions to be misplaced or rejected. ' +
+        'Check out the pull request head with actions/checkout using ' +
+        'ref: ${{ github.event.pull_request.head.sha }}.');
+}
+/**
  * Create a suggestion fenced block.
  */
 function createSuggestion(content) {
@@ -73183,6 +73195,11 @@ async function main() {
     }
     const pull_number = Number(eventPayload.pull_request.number);
     const commit_id = eventPayload.pull_request.head.sha;
+    const localHead = (await getExecOutput('git', ['rev-parse', 'HEAD'], {
+        silent: true,
+        ignoreReturnCode: true,
+    })).stdout.trim();
+    warnIfCheckoutDiffersFromPullRequestHead(localHead, commit_id);
     const pullRequestFiles = (await octokit.pulls.listFiles({ owner, repo, pull_number })).data.map((file) => file.filename);
     // Get the diff between the head branch and the base branch (limit to the files in the pull request)
     const diff = await getGitDiff(['--', ...pullRequestFiles]);
@@ -73216,4 +73233,5 @@ var __webpack_exports__getGitDiff = __webpack_exports__.Wz;
 var __webpack_exports__groupChangesForSuggestions = __webpack_exports__.jn;
 var __webpack_exports__run = __webpack_exports__.eF;
 var __webpack_exports__sortCommentsForBatch = __webpack_exports__.IU;
-export { __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__groupChangesForSuggestions as groupChangesForSuggestions, __webpack_exports__run as run, __webpack_exports__sortCommentsForBatch as sortCommentsForBatch };
+var __webpack_exports__warnIfCheckoutDiffersFromPullRequestHead = __webpack_exports__.FJ;
+export { __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__groupChangesForSuggestions as groupChangesForSuggestions, __webpack_exports__run as run, __webpack_exports__sortCommentsForBatch as sortCommentsForBatch, __webpack_exports__warnIfCheckoutDiffersFromPullRequestHead as warnIfCheckoutDiffersFromPullRequestHead };

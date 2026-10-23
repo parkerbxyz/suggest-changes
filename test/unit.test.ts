@@ -7,9 +7,49 @@ import {
   generateReviewComments,
   run,
   sortCommentsForBatch,
+  warnIfCheckoutDiffersFromPullRequestHead,
 } from '../src/index.ts'
 
 describe('Unit Tests', () => {
+  describe('warnIfCheckoutDiffersFromPullRequestHead', () => {
+    test('should warn when the checkout differs from the pull request head', () => {
+      const warnings: string[] = []
+
+      warnIfCheckoutDiffersFromPullRequestHead(
+        'merge-ref-sha',
+        'pull-request-head-sha',
+        (message) => warnings.push(message)
+      )
+
+      assert.deepStrictEqual(warnings, [
+        'The checked-out commit (merge-ref-sha) does not match the pull request head (pull-request-head-sha). ' +
+          'Merge-ref line numbers can drift from the pull request head, causing suggestions to be misplaced or rejected. ' +
+          'Check out the pull request head with actions/checkout using ' +
+          'ref: ${{ github.event.pull_request.head.sha }}.',
+      ])
+    })
+
+    test('should not warn when the checkout matches or is unavailable', () => {
+      const warnings: string[] = []
+      const logWarning = (message: string): void => {
+        warnings.push(message)
+      }
+
+      warnIfCheckoutDiffersFromPullRequestHead(
+        'pull-request-head-sha',
+        'pull-request-head-sha',
+        logWarning
+      )
+      warnIfCheckoutDiffersFromPullRequestHead(
+        '',
+        'pull-request-head-sha',
+        logWarning
+      )
+
+      assert.deepStrictEqual(warnings, [])
+    })
+  })
+
   describe('generateCommentKey', () => {
     test('should generate unique keys for different comments', () => {
       const comment1 = {
