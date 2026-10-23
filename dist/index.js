@@ -65160,6 +65160,7 @@ __nccwpck_require__.d(__webpack_exports__, {
   MW: () => (/* binding */ generateSuggestionBody),
   Wz: () => (/* binding */ getGitDiff),
   jn: () => (/* binding */ groupChangesForSuggestions),
+  Wv: () => (/* binding */ isDirectExecution),
   eF: () => (/* binding */ run),
   IU: () => (/* binding */ sortCommentsForBatch)
 });
@@ -72131,6 +72132,8 @@ function getApiBaseUrl() {
 const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
 ;// CONCATENATED MODULE: external "node:process"
 const external_node_process_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:process");
+// EXTERNAL MODULE: external "node:url"
+var external_node_url_ = __nccwpck_require__(3136);
 ;// CONCATENATED MODULE: ./node_modules/parse-git-diff/build/mjs/context.js
 class Context {
     line = 1;
@@ -72541,6 +72544,7 @@ function getFilePath(ctx, input, type) {
 /* harmony default export */ const mjs = (parseGitDiff);
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ./src/index.ts
+
 
 
 
@@ -73161,6 +73165,13 @@ async function run({ octokit, owner, repo, pull_number, commit_id, diff, event, 
     info(`Review created successfully with ${reviewComments.length} suggestion(s).`);
     return { comments: reviewComments, reviewCreated: true };
 }
+/**
+ * Check whether a module is the process entrypoint.
+ */
+function isDirectExecution(moduleUrl, entrypointPath) {
+    return (typeof entrypointPath === 'string' &&
+        moduleUrl === (0,external_node_url_.pathToFileURL)(entrypointPath).href);
+}
 // Main entrypoint (only when executed directly)
 async function main() {
     const octokit = new dist_bundle_Octokit({
@@ -73196,7 +73207,7 @@ async function main() {
     const body = getInput('comment') || '';
     await run({ octokit, owner, repo, pull_number, commit_id, diff, event, body });
 }
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectExecution(import.meta.url, process.argv[1])) {
     main().catch((err) => {
         if (isRateLimitError(err)) {
             warning(`GitHub API rate limit exceeded: ${err.message}`);
@@ -73214,6 +73225,7 @@ var __webpack_exports__generateReviewComments = __webpack_exports__.o5;
 var __webpack_exports__generateSuggestionBody = __webpack_exports__.MW;
 var __webpack_exports__getGitDiff = __webpack_exports__.Wz;
 var __webpack_exports__groupChangesForSuggestions = __webpack_exports__.jn;
+var __webpack_exports__isDirectExecution = __webpack_exports__.Wv;
 var __webpack_exports__run = __webpack_exports__.eF;
 var __webpack_exports__sortCommentsForBatch = __webpack_exports__.IU;
-export { __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__groupChangesForSuggestions as groupChangesForSuggestions, __webpack_exports__run as run, __webpack_exports__sortCommentsForBatch as sortCommentsForBatch };
+export { __webpack_exports__calculateLinePosition as calculateLinePosition, __webpack_exports__createSuggestion as createSuggestion, __webpack_exports__generateCommentKey as generateCommentKey, __webpack_exports__generateReviewComments as generateReviewComments, __webpack_exports__generateSuggestionBody as generateSuggestionBody, __webpack_exports__getGitDiff as getGitDiff, __webpack_exports__groupChangesForSuggestions as groupChangesForSuggestions, __webpack_exports__isDirectExecution as isDirectExecution, __webpack_exports__run as run, __webpack_exports__sortCommentsForBatch as sortCommentsForBatch };
